@@ -14,10 +14,14 @@ MOC_DIR = .moc
 CONFIG += c++17
 
 SOURCES += \
+CQLottieMain.cpp \
 CQLottie.cpp \
+CQLottieTree.cpp \
 
 HEADERS += \
+CQLottieMain.h \
 CQLottie.h \
+CQLottieTree.h \
 
 OBJECTS_DIR = ../obj
 

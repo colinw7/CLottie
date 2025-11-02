@@ -66,16 +66,39 @@ CLottie()
 CLottie::
 ~CLottie()
 {
+  reset();
+}
+
+void
+CLottie::
+reset()
+{
   delete root_;
+
+  root_ = nullptr;
 
   for (auto &pa : assetIds_)
     delete pa.second;
 
+  assets_  .clear();
+  assetIds_.clear();
+
   for (auto *layer : layers_)
     delete layer;
 
+  layers_  .clear();
+  layerIds_.clear();
+
   for (auto *shape : shapes_)
     delete shape;
+
+  shapes_  .clear();
+  shapeIds_.clear();
+
+  for (auto *marker : markers_)
+    delete marker;
+
+  markers_.clear();
 }
 
 bool
@@ -91,15 +114,20 @@ load(const std::string &file)
   if (isDebug())
     std::cout << *value << "\n";
 
-  delete root_;
+  reset();
 
-  root_ = new CLottieRoot(this);
+  root_ = makeRoot();
 
   if (! readRoot("root", value))
     return errorMsg("", "readRoot");
 
-  if (isPrint())
+  root_->buildLayerHier();
+
+  if (isPrint()) {
+    root_->printLayerHier();
+
     root_->printHier();
+  }
 
   return true;
 }
@@ -128,11 +156,16 @@ void
 CLottie::
 deselectAll()
 {
+  root_->setSelected(false);
+
   for (auto *layer : layers_)
     layer->setSelected(false);
 
   for (auto *shape : shapes_)
     shape->setSelected(false);
+
+  for (auto *asset : assets_)
+    asset->setSelected(false);
 }
 
 bool
@@ -198,7 +231,7 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
         if (isDebug())
           std::cout << depthStr(assetValue->hier_depth()) << "[" << i << "]\n";
 
-        auto *asset = new CLottieAsset(this);
+        auto *asset = makeAsset();
 
         if (! readAsset(msg1, assetValue, asset))
           return errorMsg(msg1, "readAsset");
@@ -213,6 +246,8 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
           std::cerr << "Duplicate asset id " << asset->id() << "\n";
 
         assetIds_[asset->id()] = asset;
+
+        assets_.push_back(asset);
 
         ++i;
       }
@@ -232,7 +267,7 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
         if (isDebug())
           std::cout << depthStr(markerValue->hier_depth()) << "[" << i << "]\n";
 
-        auto *marker = new CLottieMarker(this);
+        auto *marker = makeMarker();
 
         marker->setParent(root_);
 
@@ -264,7 +299,7 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
         if (isDebug())
           std::cout << depthStr(layerValue->hier_depth()) << "[" << i << "]\n";
 
-        auto *layer = new CLottieLayer(this);
+        auto *layer = makeLayer();
 
         layer->setParent(root_);
 
@@ -352,10 +387,10 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
       layer->setTimeStretch(valueToReal(value1));
     }
     else if (name == "ip") { // frame start (in point)
-      layer->setFrameIn(valueToInt(value1));
+      layer->setFrameIn(valueToReal(value1));
     }
     else if (name == "op") { // frame stop (out point)
-      layer->setFrameOut(valueToInt(value1));
+      layer->setFrameOut(valueToReal(value1));
     }
 #if 0
     else if (name == "st") { // start time
@@ -461,9 +496,9 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
           solid->height = valueToReal(value1);
         }
         else if (name == "sc") { // solid color
-          CRGBA c;
+          OptColor c;
           if (! readColor(msg1, value1, c))
-            return false;
+            return errorMsg(msg1, "readColor");
           solid->color = c;
         }
         else if (name == "st") { // start time (dup ?)
@@ -585,7 +620,7 @@ readLayerShapes(const std::string &msg, const CJson::ValueP &iValue, CLottieLaye
     if (isDebug())
       std::cout << depthStr(shapeValue->hier_depth()) << "[" << i << "]\n";
 
-    auto *shape = new CLottieShape(this);
+    auto *shape = makeShape();
 
     if (! readShape(msg, shapeValue, shape))
       return errorMsg(msg, "readShape");
@@ -639,7 +674,7 @@ addMarker(CLottieMarker *)
 
 bool
 CLottie::
-readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *effect) const
+readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *effect)
 {
   if (! iValue->isArray())
     return errorMsg(msg, "layer effects is not an array");
@@ -686,7 +721,7 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
         effect->setIndex(valueToInt(efValue1));
       }
       else if (efname == "ef") {
-        auto *effect1 = new CLottieEffectValue;
+        auto *effect1 = makeEffectValue();
 
         effect1->parent = effect;
 
@@ -969,7 +1004,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
       shape->setInd(valueToInt(value1));
     }
     else {
-      auto type = shape->type();
+      auto type = shape->type().value_or("");
 
       // ellipse
       if      (type == "el") {
@@ -1214,7 +1249,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
             if (isDebug())
               std::cout << depthStr(itValue->hier_depth()) << "[" << i << "]\n";
 
-            auto *shape1 = new CLottieShape(this);
+            auto *shape1 = makeShape();
 
             if (! readShape(msg1, itValue, shape1))
               return errorMsg(msg1, "readShape");
@@ -1403,7 +1438,9 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           gradientStroke->miterLimit = valueToReal(value1);
         }
         else if (name == "d") { // direction
-          shape->setDirection(valueToInt(value1));
+          Dash dash;
+          if (! readDash(msg1, value1, gradientStroke->dash))
+            return errorMsg(msg1, "readDash");
         }
         else
           unhandledName(name, value1);
@@ -1613,40 +1650,8 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           stroke->blendMode = valueToInt(value1);
         }
         else if (name == "d") { // dash
-          if (! value1->isArray())
-            return errorMsg(msg1, "dash is not an array");
-
-          auto *dArray = value1->cast<CJson::Array>();
-
-          for (const auto &dvalue : dArray->values()) {
-            if (! dvalue->isObject())
-              return errorMsg(msg, "dash array value is not an object");
-
-            auto *dobj = dvalue->cast<CJson::Object>();
-
-            CJson::Object::Names dnames;
-            dobj->getNames(dnames);
-
-            for (const auto &dname : dnames) {
-              auto msg2 = msg1 + "/" + dname;
-
-              CJson::ValueP dvalue1;
-              dobj->getNamedValue(dname, dvalue1);
-
-              if      (dname == "n") { // dash type
-                stroke->dashType = valueToString(dvalue1);
-              }
-              else if (dname == "nm") {
-                stroke->dashName = valueToString(dvalue1);
-              }
-              else if (dname == "v") { // length
-                if (! readScalarProperty(msg2, dvalue1, stroke->dashValue))
-                  return errorMsg(msg2, "readScalarProperty");
-              }
-              else
-                unhandledName(dname, dvalue1);
-            }
-          }
+          if (! readDash(msg1, value1, stroke->dash))
+            return errorMsg(msg1, "readDash");
         }
         else
           unhandledName(name, value1);
@@ -1812,7 +1817,7 @@ readAsset(const std::string &msg, const CJson::ValueP &iValue, CLottieAsset *ass
         if (isDebug())
           std::cout << depthStr(layerValue->hier_depth()) << "[" << i << "]\n";
 
-        auto *layer = new CLottieLayer(this);
+        auto *layer = makeLayer();
 
         if (! readLayer(msg1, layerValue, layer))
           return errorMsg(msg1, "readLayer");
@@ -1876,7 +1881,7 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       if (position.animated.value_or(false)) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
-            return errorMsg(msg1, "k value is object");
+            return errorMsg(msg1, "k value is not an object");
 
           SplitPositionProperty::KeyFrame keyFrame;
 
@@ -1965,6 +1970,9 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
     else if (name1 == "ix") {
       position.index = valueToInt(value2);
     }
+    else if (name1 == "l") {
+      position.length = valueToInt(value2);
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2007,7 +2015,7 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
         if (vector.animated.value_or(false)) {
           for (const auto &kValue : kArray2->values()) {
             if (! kValue->isObject())
-              return errorMsg(msg1, "k value is object");
+              return errorMsg(msg1, "k value is not an object");
 
             VectorProperty::KeyFrame keyFrame;
 
@@ -2089,6 +2097,9 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
     else if (name1 == "ix") {
       vector.index = valueToInt(value2);
     }
+    else if (name1 == "l") {
+      vector.length = valueToInt(value2);
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2130,7 +2141,7 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       if (position.animated.value_or(false)) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
-            return errorMsg(msg1, "k value is object");
+            return errorMsg(msg1, "k value is not an object");
 
           PositionProperty::KeyFrame keyFrame;
 
@@ -2211,6 +2222,9 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
     else if (name1 == "ix") {
       position.index = valueToInt(value2);
     }
+    else if (name1 == "l") {
+      position.length = valueToInt(value2);
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2251,7 +2265,7 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
       if (size.animated.value_or(false)) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
-            return errorMsg(msg1, "k value is object");
+            return errorMsg(msg1, "k value is not an object");
 
           SizeProperty::KeyFrame keyFrame;
 
@@ -2372,7 +2386,7 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
       if (color.animated.value_or(false)) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
-            return errorMsg(msg1, "k value is object");
+            return errorMsg(msg1, "k value is not an object");
 
           ColorProperty::KeyFrame keyFrame;
 
@@ -2404,10 +2418,11 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               for (const auto &n : numbers)
                 keyFrame.startValue.vals.push_back(CRGBA(n, n, n)); // TODO
 #else
-              CRGBA c;
+              OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
-              keyFrame.startValue.vals.push_back(c);
+              if (c)
+                keyFrame.startValue.vals.push_back(c.value());
 #endif
             }
             else if (name2 == "e") { // end value
@@ -2418,10 +2433,11 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               for (const auto &n : numbers)
                 keyFrame.startValue.vals.push_back(CRGBA(n, n, n)); // TODO
 #else
-              CRGBA c;
+              OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
-              keyFrame.endValue.vals.push_back(c);
+              if (c)
+                keyFrame.endValue.vals.push_back(c.value());
 #endif
             }
             else if (name2 == "n") { // interpolation key
@@ -2454,11 +2470,12 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
         }
       }
       else {
-        CRGBA c;
+        OptColor c;
         if (! readColor(msg1, value2, c))
-          return false;
+          return errorMsg(msg1, "readColor");
 
-        color.values.push_back(c);
+        if (c)
+          color.values.push_back(c.value());
       }
     }
     else if (name1 == "ix") {
@@ -2538,7 +2555,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
             }
             else {
               if (! value3->isObject())
-                return errorMsg(msg2, "i value is object");
+                return errorMsg(msg2, "i value is not an object");
 
               auto *kObj4 = value3->cast<CJson::Object>();
 
@@ -2597,7 +2614,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
             }
             else {
               if (! value3->isObject())
-                return errorMsg(msg2, "o value is object");
+                return errorMsg(msg2, "o value is not an object");
 
               auto *kObj4 = value3->cast<CJson::Object>();
 
@@ -2673,7 +2690,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
-                return errorMsg(msg1, "k value is object");
+                return errorMsg(msg1, "k value is not an object");
 
               auto *kObj4 = kValue4->cast<CJson::Object>();
 
@@ -2716,7 +2733,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
-                return errorMsg(msg1, "k value is object");
+                return errorMsg(msg1, "k value is not an object");
 
               auto *kObj4 = kValue4->cast<CJson::Object>();
 
@@ -2974,13 +2991,13 @@ readTransform(const std::string &msg1, CJson::ValueP &value1, Transform *transfo
         // TODO: skip ?
       }
       else if (name1 == "so") {
-        auto *repeater = static_cast<CLottieShape::Repeater *>(transform->repeater);
+        auto *repeater = static_cast<CLottieRepeater *>(transform->repeater);
 
         if (! readScalarProperty(msg2, value2, repeater->startOpacity))
           return errorMsg(msg2, "readScalarProperty");
       }
       else if (name1 == "eo") {
-        auto *repeater = static_cast<CLottieShape::Repeater *>(transform->repeater);
+        auto *repeater = static_cast<CLottieRepeater *>(transform->repeater);
 
         if (! readScalarProperty(msg2, value2, repeater->endOpacity))
           return errorMsg(msg2, "readScalarProperty");
@@ -3001,7 +3018,7 @@ getKeyFrameValues(const std::string &xyMsg, const std::string &name, CJson::Valu
                   std::vector<XYVals> &xyValues) const
 {
   if (! xyValue->isObject())
-    return errorValueMsg(xyMsg, name + " value is object", xyValue);
+    return errorValueMsg(xyMsg, name + " value is not an object", xyValue);
 
   auto *kObj4 = xyValue->cast<CJson::Object>();
 
@@ -3047,6 +3064,48 @@ getKeyFrameValues(const std::string &xyMsg, const std::string &name, CJson::Valu
   }
 
   xyValues.push_back(xyvals);
+
+  return true;
+}
+
+bool
+CLottie::
+readDash(const std::string &msg, const CJson::ValueP &iValue, Dash &dash) const
+{
+  if (! iValue->isArray())
+    return errorMsg(msg, "dash is not an array");
+
+  auto *dArray = iValue->cast<CJson::Array>();
+
+  for (const auto &dvalue : dArray->values()) {
+    if (! dvalue->isObject())
+      return errorMsg(msg, "dash array value is not an object");
+
+    auto *dobj = dvalue->cast<CJson::Object>();
+
+    CJson::Object::Names dnames;
+    dobj->getNames(dnames);
+
+    for (const auto &dname : dnames) {
+      auto msg2 = msg + "/" + dname;
+
+      CJson::ValueP dvalue1;
+      dobj->getNamedValue(dname, dvalue1);
+
+      if      (dname == "n") { // dash type
+        dash.type = valueToString(dvalue1);
+      }
+      else if (dname == "nm") {
+        dash.name = valueToString(dvalue1);
+      }
+      else if (dname == "v") { // length
+        if (! readScalarProperty(msg2, dvalue1, dash.value))
+          return errorMsg(msg2, "readScalarProperty");
+      }
+      else
+        unhandledName(dname, dvalue1);
+    }
+  }
 
   return true;
 }
@@ -3101,7 +3160,7 @@ readVector(const std::string &msg, const CJson::ValueP &iValue, CPoint2D &p) con
 
 bool
 CLottie::
-readColor(const std::string &msg, const CJson::ValueP &iValue, CRGBA &c) const
+readColor(const std::string &msg, const CJson::ValueP &iValue, OptColor &c) const
 {
   if (iValue->isString()) {
     auto str = valueToString(iValue);
@@ -3113,8 +3172,6 @@ readColor(const std::string &msg, const CJson::ValueP &iValue, CRGBA &c) const
 
       c = CRGBA(r, g, b, a);
     }
-    else
-      c = CRGBA(0, 0, 0, 0);
 
     return true;
   }
@@ -3255,26 +3312,99 @@ getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) co
   if (! transform)
     return CMatrix2D::identity();
 
-  auto apxy = transform->anchorPoint.tvalue(timeFrame, CLottie::XYVals());
+  // TODO: autoOrient adds frame angle ?
+
+  auto apxy = transform->anchorPoint.tvalue(timeFrame, CPoint2D(0, 0)).value();
   auto ap   = (apxy.isSet() ? CPoint2D(apxy.xvals[0], apxy.yvals[0]) : CPoint2D(0, 0));
 
-  auto s = transform->scale   .tvalue(timeFrame, CPoint2D(100, 100));
+  auto s = transform->scale   .tvalue(timeFrame, CPoint2D(100, 100)).value();
   auto r = transform->rotation.tvalue(timeFrame, 0).value();
-  auto p = transform->position.tvalue(timeFrame, CPoint2D(0, 0));
+  auto p = transform->position.tvalue(timeFrame, CPoint2D(0, 0)).value();
 
   auto m1 = CMatrix2D::translation(-ap.x, -ap.y);
   auto m2 = CMatrix2D::scale(s.x/100.0, s.y/100.0);
   auto m3 = CMatrix2D::rotation(CMathGen::DegToRad(r));
-#if 0
-  auto m4 = CMatrix2D::translation(ap.x, ap.y);
-  auto m5 = CMatrix2D::translation(p.x, p.y);
-
-  return m5*m4*m3*m2*m1;
-#else
   auto m4 = CMatrix2D::translation(p.x, p.y);
 
   return m4*m3*m2*m1;
-#endif
+}
+
+CMatrix2D
+CLottie::
+getRepeaterMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform, double f) const
+{
+  auto apxy = transform->anchorPoint.tvalue(timeFrame, CPoint2D(0, 0)).value();
+  auto ap   = (apxy.isSet() ? CPoint2D(apxy.xvals[0], apxy.yvals[0]) : CPoint2D(0, 0));
+
+  auto s = transform->scale   .tvalue(timeFrame, CPoint2D(100, 100)).value();
+  auto r = transform->rotation.tvalue(timeFrame, 0).value();
+  auto p = transform->position.tvalue(timeFrame, CPoint2D(0, 0)).value();
+
+  auto m1 = CMatrix2D::translation(-ap.x, -ap.y);
+  auto m2 = CMatrix2D::rotation(CMathGen::DegToRad(r)*f); // additive
+  auto m3 = CMatrix2D::scale(std::pow(s.x/100.0, f), std::pow(s.y/100.0, f)); // multiplicative
+  auto m4 = CMatrix2D::translation(ap.x, ap.y);
+  auto m5 = CMatrix2D::translation(p.x*f, p.y*f);  // additive
+
+  return m5*m4*m3*m2*m1;
+}
+
+CLottieRoot *
+CLottie::
+makeRoot()
+{
+  return new CLottieRoot(this);
+}
+
+CLottieLayer *
+CLottie::
+makeLayer()
+{
+  if (factory_)
+    return factory_->makeLayer(this);
+
+  return new CLottieLayer(this);
+}
+
+CLottieShape *
+CLottie::
+makeShape()
+{
+  if (factory_)
+    return factory_->makeShape(this);
+
+  return new CLottieShape(this);
+}
+
+CLottieAsset *
+CLottie::
+makeAsset()
+{
+  if (factory_)
+    return factory_->makeAsset(this);
+
+  return new CLottieAsset(this);
+}
+
+CLottieMarker *
+CLottie::
+makeMarker()
+{
+  return new CLottieMarker(this);
+}
+
+CLottieEffect *
+CLottie::
+makeEffect()
+{
+  return new CLottieEffect(this);
+}
+
+CLottieEffectValue *
+CLottie::
+makeEffectValue()
+{
+  return new CLottieEffectValue(this);
 }
 
 //---
@@ -3292,6 +3422,33 @@ CLottieRoot::
 
 void
 CLottieRoot::
+buildLayerHier()
+{
+  for (auto *layer : layers_) {
+    auto *player = layer->getParentLayer();
+
+    if (! player) {
+      childLayers_.push_back(layer);
+      continue;
+    }
+
+    player->addChildLayer(layer);
+  }
+}
+
+void
+CLottieRoot::
+printLayerHier() const
+{
+  for (auto *layer : childLayers_) {
+    std::cerr << layer->name().value_or("") << "\n";
+
+    layer->printLayerHier("  ");
+  }
+}
+
+void
+CLottieRoot::
 printI(const std::string &prefix, bool hier) const
 {
   CLottieObject::printI(prefix, hier);
@@ -3300,9 +3457,9 @@ printI(const std::string &prefix, bool hier) const
 
   printValue(prefix, "version", version_);
 
-  printValue(prefix, "frameRate" , timeFrame_.frameRate);
-  printValue(prefix, "frameStart", timeFrame_.frameStart);
-  printValue(prefix, "frameStop" , timeFrame_.frameStop);
+  optPrintValue(prefix, "frameRate" , timeFrame_.frameRate);
+  optPrintValue(prefix, "frameStart", timeFrame_.frameStart);
+  optPrintValue(prefix, "frameStop" , timeFrame_.frameStop);
 
   optPrintValue(prefix, "width" , width_);
   optPrintValue(prefix, "height", height_);
@@ -3458,6 +3615,41 @@ calcHierTransform(const TimeFrame &timeFrame) const
   return m;
 }
 
+//---
+
+CLottieRepeater *
+CLottieLayer::
+calcRepeater() const
+{
+  auto *repeaterShape = getRepeaterShape();
+
+  auto *repeater = (repeaterShape ? repeaterShape->repeater() : nullptr);
+
+  if (repeater)
+    return repeater;
+
+  auto *player = getParentLayer();
+
+  if (player)
+    return player->calcRepeater();
+
+  return nullptr;
+}
+
+CLottieShape *
+CLottieLayer::
+getRepeaterShape() const
+{
+  for (auto *shape : shapes()) {
+    if (shape->type() == "rp")
+      return shape;
+  }
+
+  return nullptr;
+}
+
+//---
+
 CLottieLayer *
 CLottieLayer::
 getParentLayer() const
@@ -3473,6 +3665,17 @@ getParentAsset() const
     return dynamic_cast<CLottieAsset *>(parent_);
 
   return nullptr;
+}
+
+void
+CLottieLayer::
+printLayerHier(const std::string &prefix) const
+{
+  for (auto *layer : childLayers_) {
+    std::cerr << prefix << layer->name().value_or("") << "\n";
+
+    layer->printLayerHier(prefix + "  ");
+  }
 }
 
 void
@@ -3506,27 +3709,6 @@ printI(const std::string &prefix, bool hier) const
   optPrintValue(prefix, "timeStretch", timeStretch_);
 
   optPrintValue(prefix, "refId", refId_);
-
-  if (solid_) {
-    std::cout << prefix << "Solid\n";
-
-    auto prefix1 = prefix + "  ";
-
-    optPrintValue(prefix1, "width" , solid_->width);
-    optPrintValue(prefix1, "height", solid_->height);
-    optPrintValue(prefix1, "color" , solid_->color);
-  }
-
-  if (precomp_) {
-    std::cout << prefix << "Precomp\n";
-
-    auto prefix1 = prefix + "  ";
-
-    optPrintValue(prefix1, "refId"    , precomp_->refId);
-    optPrintValue(prefix1, "width"    , precomp_->width);
-    optPrintValue(prefix1, "height"   , precomp_->height);
-    optPrintValue(prefix1, "startTime", precomp_->startTime);
-  }
 
   if (transform_)
     transform_->print(prefix);
@@ -3704,31 +3886,22 @@ getRoot() const
   return layer->getRoot();
 }
 
-CMatrix2D
+//---
+
+CLottieLayer *
 CLottieShape::
-calcTransform(const TimeFrame &timeFrame) const
+getHierParentLayer() const
 {
-  if (! transform_)
-    return CMatrix2D::identity();
+  auto *layer = getParentLayer();
 
-  return lottie_->getTransformMatrix(timeFrame, transform_);
-}
+  if (! layer) {
+    auto *pshape = getParentShape();
 
-CMatrix2D
-CLottieShape::
-calcHierTransform(const TimeFrame &timeFrame) const
-{
-  auto m = calcTransform(timeFrame);
+    if (pshape)
+      layer = pshape->getHierParentLayer();
+  }
 
-  auto *pshape = getParentShape();
-  auto *player = getParentLayer();
-
-  if      (pshape)
-    m = pshape->calcHierTransform(timeFrame)*m;
-  else if (player)
-    m = player->calcHierTransform(timeFrame)*m;
-
-  return m;
+  return layer;
 }
 
 CLottieLayer *
@@ -3750,6 +3923,186 @@ getParentShape() const
 
   return nullptr;
 }
+
+//---
+
+CMatrix2D
+CLottieShape::
+calcTransform(const TimeFrame &timeFrame) const
+{
+  if (! transform_)
+    return CMatrix2D::identity();
+
+  return lottie_->getTransformMatrix(timeFrame, transform_);
+}
+
+#if 0
+CMatrix2D
+CLottieShape::
+calcHierTransform(const TimeFrame &timeFrame) const
+{
+  auto m = calcTransform(timeFrame);
+
+  auto *pshape = getParentShape();
+  auto *player = getParentLayer();
+
+  if      (pshape)
+    m = pshape->calcHierTransform(timeFrame)*m;
+  else if (player)
+    m = player->calcHierTransform(timeFrame)*m;
+
+  return m;
+}
+#endif
+
+CMatrix2D
+CLottieShape::
+calcHierTransform(const TimeFrame &timeFrame) const
+{
+  auto *pshape = getParentShape();
+  auto *player = getParentLayer();
+
+  CLottieShape *transformShape = nullptr;
+
+  if (pshape)
+    transformShape = pshape->getTransformShape();
+
+  CMatrix2D m;
+
+  if (transformShape)
+    m = transformShape->calcTransform(timeFrame);
+  else
+    m = calcTransform(timeFrame);
+
+  if      (pshape)
+    m = pshape->calcHierTransform(timeFrame)*m;
+  else if (player)
+    m = player->calcHierTransform(timeFrame)*m;
+
+  return m;
+}
+
+CLottieShape *
+CLottieShape::
+getTransformShape() const
+{
+  for (auto *shape : shapes()) {
+    if (shape->type() == "tr")
+      return shape;
+  }
+
+  return nullptr;
+}
+
+//---
+
+CLottieShape::Fill *
+CLottieShape::
+calcFill() const
+{
+  if (type() == "fl")
+    return const_cast<CLottieShape::Fill *>(fill());
+
+  auto *pshape = getParentShape();
+  if (! pshape) return nullptr;
+
+  auto fillShape = pshape->getFillShape();
+
+  return (fillShape ? fillShape->fill() : nullptr);
+}
+
+CLottieShape *
+CLottieShape::
+getFillShape() const
+{
+  for (auto *shape : shapes()) {
+    if (shape->type() == "fl")
+      return shape;
+  }
+
+  return nullptr;
+}
+
+//---
+
+CLottieRepeater *
+CLottieShape::
+calcRepeater() const
+{
+  if (type() == "rp")
+    return const_cast<CLottieRepeater *>(repeater());
+
+  auto *repeaterShape = getRepeaterShape();
+
+  auto *repeater = (repeaterShape ? repeaterShape->repeater() : nullptr);
+
+  if (repeater)
+    return repeater;
+
+  auto *pshape = getParentShape();
+
+  if (pshape)
+    return pshape->calcRepeater();
+
+  auto *player = getParentLayer();
+
+  return (player ? player->calcRepeater() : nullptr);
+}
+
+CLottieShape *
+CLottieShape::
+getRepeaterShape() const
+{
+  for (auto *shape : shapes()) {
+    if (shape->type() == "rp")
+      return shape;
+  }
+
+  return nullptr;
+}
+
+//---
+
+CLottieShape::Merge *
+CLottieShape::
+calcHierMerge() const
+{
+  auto *mergeShape = calcHierMergeShape();
+
+  return (mergeShape ? mergeShape->merge() : nullptr);
+}
+
+CLottieShape *
+CLottieShape::
+calcHierMergeShape() const
+{
+  if (type() == "mm" && ! hidden().value_or(false))
+    return const_cast<CLottieShape*>(this);
+
+  auto *pshape = getParentShape();
+  if (! pshape) return nullptr;
+
+  auto *mergeShape = pshape->getMergeShape();
+
+  if (mergeShape)
+    return mergeShape;
+
+  return pshape->calcHierMergeShape();
+}
+
+CLottieShape *
+CLottieShape::
+getMergeShape() const
+{
+  for (auto *shape : shapes()) {
+    if (shape->type() == "mm" && ! shape->hidden().value_or(false))
+      return shape;
+  }
+
+  return nullptr;
+}
+
+//---
 
 void
 CLottieShape::
@@ -3839,6 +4192,19 @@ CLottieObject::
 {
 }
 
+bool
+CLottieObject::
+isHierSelected() const
+{
+  if (selected())
+    return true;
+
+  if (parent())
+    return parent()->isHierSelected();
+
+  return false;
+}
+
 void
 CLottieObject::
 debugPrint() const
@@ -3851,9 +4217,7 @@ CLottieObject::
 printI(const std::string &prefix, bool /*hier*/) const
 {
   optPrintValue(prefix, "name", name_);
-
-  if (type_ != "")
-    std::cout << prefix << "type=" << type_ << "\n";
+  optPrintValue(prefix, "type", type_);
 
   if (typeId_)
     std::cout << prefix << "typeId=" <<
@@ -3983,7 +4347,7 @@ print(const std::string &prefix) const
 }
 
 void
-CLottieShape::Repeater::
+CLottieRepeater::
 print(const std::string &prefix) const
 {
   std::cout << prefix << "Repeater\n";
@@ -4016,9 +4380,9 @@ print(const std::string &prefix) const
   optPrintValue(prefix1, "lineJoin"      , lineJoin);
   optPrintValue(prefix1, "miterLimit"    , miterLimit);
   printProperty(prefix1, "miterLimitAnim", miterLimitAnim);
-  optPrintValue(prefix1, "dashType"      , dashType);
-  optPrintValue(prefix1, "dashName"      , dashName);
-  printProperty(prefix1, "dashValue"     , dashValue);
+  optPrintValue(prefix1, "dashType"      , dash.type);
+  optPrintValue(prefix1, "dashName"      , dash.name);
+  printProperty(prefix1, "dashValue"     , dash.value);
   optPrintValue(prefix1, "blendMode"     , blendMode);
 }
 

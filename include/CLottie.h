@@ -43,7 +43,7 @@ struct XYVals {
 
   bool isSet() const { return ! xvals.empty() && ! yvals.empty(); }
 
-  CPoint2D toPoint(const CPoint2D &def) const {
+  CPoint2D toPoint(const CPoint2D &def=CPoint2D()) const {
     if (! isSet())
       return def;
 
@@ -240,17 +240,25 @@ inline Points mapValue<Points>(double t, const Points &v1, const Points &v2) {
 }
 
 struct TimeFrame {
-  double frameRate  { 0.0 };
-  double frameStart { 0.0 };
-  double frameStop  { 0.0 };
-  double secs       { 0.0 };
-  uint   frame      { 0 };
+  using OptReal = std::optional<double>;
+
+  OptReal frameRate;
+  OptReal frameStart;
+  OptReal frameStop;
+
+  double secs  { 0.0 };
+  uint   frame { 0 };
+
+  double mapFrame() const {
+    return CMathUtil::map(frame, frameStart.value_or(0.0), frameStop.value_or(1.0), 0.0, 1.0);
+  }
 };
 
 }
 
 //---
 
+struct CLottieFactory;
 struct CLottieRoot;
 struct CLottieLayer;
 struct CLottieMarker;
@@ -273,6 +281,11 @@ class CLottie {
   using OptStr   = std::optional<std::string>;
   using OptPoint = std::optional<CPoint2D>;
   using OptColor = std::optional<CRGBA>;
+
+  using Assets  = std::vector<CLottieAsset *>;
+  using Layers  = std::vector<CLottieLayer *>;
+  using Shapes  = std::vector<CLottieShape *>;
+  using Markers = std::vector<CLottieMarker *>;
 
   struct RVals {
     RVals() { }
@@ -370,74 +383,51 @@ class CLottie {
       }
     }
 
-    OptVal value(const OptVal &def) const {
+    OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
         return def;
 
       return values[0];
     }
 
-#if 0
-    std::vector<T> values() const {
-      return values;
-    }
-#endif
-
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
       if (animated.value_or(false)) {
         if (! isTSet())
           return def;
 
-#if 0
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
-        auto t2 = (t1 + 1) % keyFrames.size();
-        auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
-
-        if (keyFrames[t1].startValue.isSet() && keyFrames[t2].startValue.isSet()) {
-          auto v1 = keyFrames[t1].startValue.vals[0];
-          auto v2 = keyFrames[t2].startValue.vals[0];
-
-          return CLottieUtil::mapValue(dt, v1, v2);
-        }
-        else
-          return def;
-#else
         return keyFrameValue(frame, def);
-#endif
       }
       else
         return value(def);
     }
 
-#if 0
-    std::vector<T> tvalues(const TimeFrame &frame) const {
-      if (animated.value_or(false)) {
-        if (! isTSet())
-          return values();
-
-        return keyFrameValues(frame);
-      }
-      else
-        return values();
-    }
-#endif
-
     OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
       if (keyFrames.empty())
         return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
+        OptVal v1, v2;
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        if (! keyFrames[0].startValue.vals.empty())
+          v1 = keyFrames[0].startValue.vals[0];
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+        if (! keyFrames[0].endValue.vals.empty())
+          v2 = keyFrames[0].endValue.vals[0];
+
+        if (v1 && v2) {
+          auto dt = frame.mapFrame();
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else
+          return v2;
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -451,17 +441,23 @@ class CLottie {
           if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
             return def;
 
-          T v1 { }, v2 { };
+          OptVal v1, v2;
 
           if (! keyFrames[i].startValue.vals.empty())
             v1 = keyFrames[i].startValue.vals[0];
 
           if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue  .vals[0];
+            v2 = keyFrames[i].endValue.vals[0];
 
-          auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
 
-          return CLottieUtil::mapValue(dt, v1, v2);
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else
+            return v2;
         }
       }
 
@@ -477,7 +473,9 @@ class CLottie {
   };
 
   struct SplitPositionProperty : Property {
-    using KeyFrame       = CLottieUtil::KeyFrameT<CPoint2D>;
+    using KeyFrame = CLottieUtil::KeyFrameT<CPoint2D>;
+    using OptVal   = std::optional<CPoint2D>;
+
     using ScalarProperty = PropertyT<double>;
 
     std::vector<CPoint2D> values;
@@ -487,6 +485,10 @@ class CLottie {
     ScalarProperty x;
     ScalarProperty y;
 
+    OptInt length;
+
+    //---
+
     bool isSet() const {
       return (! values.empty() || ! keyFrames.empty());
     }
@@ -532,55 +534,51 @@ class CLottie {
       }
     }
 
-    const CPoint2D &value(const CPoint2D &def) const {
+    OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
         return def;
 
       return values[0];
     }
 
-    CPoint2D tvalue(const TimeFrame &frame, const CPoint2D &def) const {
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
       if (animated.value_or(false)) {
         if (! isTSet())
           return def;
 
-#if 0
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
-        auto t2 = (t1 + 1) % keyFrames.size();
-        auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
-
-        if (keyFrames[t1].startValue.isSet() && keyFrames[t2].startValue.isSet()) {
-          auto v1 = keyFrames[t1].startValue.vals[0];
-          auto v2 = keyFrames[t2].startValue.vals[0];
-
-          return CLottieUtil::mapValue(dt, v1, v2);
-        }
-        else
-          return def;
-#else
         return keyFrameValue(frame, def);
-#endif
       }
       else
         return value(def);
     }
 
-    CPoint2D keyFrameValue(const TimeFrame &frame, const CPoint2D &def) const {
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
       if (keyFrames.empty())
         return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
+        OptVal v1, v2;
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        if (! keyFrames[0].startValue.vals.empty())
+          v1 = keyFrames[0].startValue.vals[0];
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+        if (! keyFrames[0].endValue.vals.empty())
+          v2 = keyFrames[0].endValue.vals[0];
+
+        if (v1 && v2) {
+          auto dt = frame.mapFrame();
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else
+          return v2;
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -591,16 +589,26 @@ class CLottie {
               --i;
           }
 
-          if (! keyFrames[i].startValue.vals.empty() && ! keyFrames[i].endValue.vals.empty()) {
-            auto v1 = keyFrames[i].startValue.vals[0];
-            auto v2 = keyFrames[i].endValue  .vals[0];
+          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
+            return def;
 
+          OptVal v1, v2;
+
+          if (! keyFrames[i].startValue.vals.empty())
+            v1 = keyFrames[i].startValue.vals[0];
+
+          if (! keyFrames[i].endValue.vals.empty())
+            v2 = keyFrames[i].endValue.vals[0];
+
+          if (v1 && v2) {
             auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
 
-            return CLottieUtil::mapValue(dt, v1, v2);
+            return CLottieUtil::mapValue(dt, *v1, *v2);
           }
+          else if (v1)
+            return v1;
           else
-            return def;
+            return v2;
         }
       }
 
@@ -610,9 +618,14 @@ class CLottie {
 
   struct VectorProperty : Property {
     using KeyFrame = CLottieUtil::KeyFrameT<CPoint2D>;
+    using OptVal   = std::optional<CPoint2D>;
 
     std::vector<CPoint2D> values;
     std::vector<KeyFrame> keyFrames;
+
+    OptInt length;
+
+    //---
 
     bool isSet() const {
       return (! values.empty() || ! keyFrames.empty());
@@ -659,55 +672,51 @@ class CLottie {
       }
     }
 
-    const CPoint2D &value(const CPoint2D &def) const {
+    OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
         return def;
 
       return values[0];
     }
 
-    CPoint2D tvalue(const TimeFrame &frame, const CPoint2D &def) const {
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
       if (animated.value_or(false)) {
         if (! isTSet())
           return def;
 
-#if 0
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
-        auto t2 = (t1 + 1) % keyFrames.size();
-        auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
-
-        if (keyFrames[t1].startValue.isSet() && keyFrames[t2].startValue.isSet()) {
-          auto v1 = keyFrames[t1].startValue.vals[0];
-          auto v2 = keyFrames[t2].startValue.vals[0];
-
-          return CLottieUtil::mapValue(dt, v1, v2);
-        }
-        else
-          return def;
-#else
         return keyFrameValue(frame, def);
-#endif
       }
       else
         return value(def);
     }
 
-    CPoint2D keyFrameValue(const TimeFrame &frame, const CPoint2D &def) const {
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
       if (keyFrames.empty())
         return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
+        OptVal v1, v2;
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        if (! keyFrames[0].startValue.vals.empty())
+          v1 = keyFrames[0].startValue.vals[0];
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+        if (! keyFrames[0].endValue.vals.empty())
+          v2 = keyFrames[0].endValue.vals[0];
+
+        if (v1 && v2) {
+          auto dt = frame.mapFrame();
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else
+          return v2;
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -718,16 +727,26 @@ class CLottie {
               --i;
           }
 
-          if (! keyFrames[i].startValue.vals.empty() && ! keyFrames[i].endValue.vals.empty()) {
-            auto v1 = keyFrames[i].startValue.vals[0];
-            auto v2 = keyFrames[i].endValue  .vals[0];
+          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
+            return def;
 
+          OptVal v1, v2;
+
+          if (! keyFrames[i].startValue.vals.empty())
+            v1 = keyFrames[i].startValue.vals[0];
+
+          if (! keyFrames[i].endValue.vals.empty())
+            v2 = keyFrames[i].endValue.vals[0];
+
+          if (v1 && v2) {
             auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
 
-            return CLottieUtil::mapValue(dt, v1, v2);
+            return CLottieUtil::mapValue(dt, *v1, *v2);
           }
+          else if (v1)
+            return v1;
           else
-            return def;
+            return v2;
         }
       }
 
@@ -737,9 +756,14 @@ class CLottie {
 
   struct PositionProperty : Property {
     using KeyFrame = CLottieUtil::KeyFrameT<XYVals>;
+    using OptVal   = std::optional<XYVals>;
 
     std::vector<XYVals>   values;
     std::vector<KeyFrame> keyFrames;
+
+    OptInt length;
+
+    //---
 
     bool isSet() const {
       return (! values.empty() || ! keyFrames.empty());
@@ -786,55 +810,51 @@ class CLottie {
       }
     }
 
-    XYVals value(const XYVals &def) const {
+    OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
         return def;
 
       return values[0];
     }
 
-    XYVals tvalue(const TimeFrame &frame, const XYVals &def) const {
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
       if (animated.value_or(false)) {
         if (! isTSet())
           return def;
 
-#if 0
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
-        auto t2 = (t1 + 1) % keyFrames.size();
-        auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
-
-        if (keyFrames[t1].startValue.isSet() && keyFrames[t2].startValue.isSet()) {
-          auto v1 = keyFrames[t1].startValue.vals[0];
-          auto v2 = keyFrames[t2].startValue.vals[0];
-
-          return CLottieUtil::mapValue(dt, v1, v2);
-        }
-        else
-          return def;
-#else
         return keyFrameValue(frame, def);
-#endif
       }
       else
         return value(def);
     }
 
-    XYVals keyFrameValue(const TimeFrame &frame, const XYVals &def) const {
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
       if (keyFrames.empty())
         return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
+        OptVal v1, v2;
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        if (! keyFrames[0].startValue.vals.empty())
+          v1 = keyFrames[0].startValue.vals[0];
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+        if (! keyFrames[0].endValue.vals.empty())
+          v2 = keyFrames[0].endValue.vals[0];
+
+        if (v1 && v2) {
+          auto dt = frame.mapFrame();
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else
+          return v2;
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -848,7 +868,7 @@ class CLottie {
           if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
             return def;
 
-          XYVals v1, v2;
+          OptVal v1, v2;
 
           if (! keyFrames[i].startValue.vals.empty())
             v1 = keyFrames[i].startValue.vals[0];
@@ -856,9 +876,15 @@ class CLottie {
           if (! keyFrames[i].endValue.vals.empty())
             v2 = keyFrames[i].endValue.vals[0];
 
-          auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
 
-          return CLottieUtil::mapValue(dt, v1, v2);
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else
+            return v2;
         }
       }
 
@@ -868,6 +894,7 @@ class CLottie {
 
   struct SizeProperty : Property {
     using KeyFrame = CLottieUtil::KeyFrameT<XYVals>;
+    using OptVal   = std::optional<XYVals>;
 
     std::vector<XYVals>   values;
     std::vector<KeyFrame> keyFrames;
@@ -917,55 +944,51 @@ class CLottie {
       }
     }
 
-    XYVals value(const XYVals &def) const {
+    OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
         return def;
 
       return values[0];
     }
 
-    XYVals tvalue(const TimeFrame &frame, const XYVals &def) const {
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
       if (animated.value_or(false)) {
         if (! isTSet())
           return def;
 
-#if 0
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
-        auto t2 = (t1 + 1) % keyFrames.size();
-        auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
-
-        if (keyFrames[t1].startValue.isSet() && keyFrames[t2].startValue.isSet()) {
-          auto v1 = keyFrames[t1].startValue.vals[0];
-          auto v2 = keyFrames[t2].startValue.vals[0];
-
-          return CLottieUtil::mapValue(dt, v1, v2);
-        }
-        else
-          return def;
-#else
         return keyFrameValue(frame, def);
-#endif
       }
       else
         return value(def);
     }
 
-    XYVals keyFrameValue(const TimeFrame &frame, const XYVals &def) const {
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
       if (keyFrames.empty())
         return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
+        OptVal v1, v2;
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        if (! keyFrames[0].startValue.vals.empty())
+          v1 = keyFrames[0].startValue.vals[0];
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+        if (! keyFrames[0].endValue.vals.empty())
+          v2 = keyFrames[0].endValue.vals[0];
+
+        if (v1 && v2) {
+          auto dt = frame.mapFrame();
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else
+          return v2;
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -979,7 +1002,7 @@ class CLottie {
           if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
             return def;
 
-          XYVals v1, v2;
+          OptVal v1, v2;
 
           if (! keyFrames[i].startValue.vals.empty())
             v1 = keyFrames[i].startValue.vals[0];
@@ -987,9 +1010,15 @@ class CLottie {
           if (! keyFrames[i].endValue.vals.empty())
             v2 = keyFrames[i].endValue.vals[0];
 
-          auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
 
-          return CLottieUtil::mapValue(dt, v1, v2);
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else
+            return v2;
         }
       }
 
@@ -1231,14 +1260,14 @@ class CLottie {
         auto v1 = keyFrames[0].startValue.vals[0];
         auto v2 = keyFrames[0].endValue  .vals[0];
 
-        auto dt = CMathUtil::map(frame.frame, frame.frameStart, frame.frameStop, 0.0, 1.0);
+        auto dt = frame.mapFrame();
 
         return CLottieUtil::mapValue(dt, v1, v2);
       }
 
       for (size_t i = 0; i < keyFrames.size(); ++i) {
         auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop;
+        auto frameStop1  = frame.frameStop.value_or(1.0);
 
         if (i < keyFrames.size() - 1)
           frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
@@ -1271,6 +1300,7 @@ class CLottie {
   using ScalarProperty = PropertyT<double>;
   using ArrayProperty  = PropertyT<CLottieUtil::RValArray>;
 
+  // trasnform
   struct Transform {
     PositionProperty      anchorPoint;
     SplitPositionProperty position;
@@ -1289,9 +1319,18 @@ class CLottie {
     void print(const std::string &prefix="") const;
   };
 
+  // dash
+  struct Dash {
+    OptStr         type;
+    OptStr         name;
+    ScalarProperty value;
+  };
+
  public:
   CLottie();
  ~CLottie();
+
+  //---
 
   bool isDebug() const { return debug_; }
   void setDebug(bool b) { debug_ = b; }
@@ -1299,7 +1338,16 @@ class CLottie {
   bool isPrint() const { return print_; }
   void setPrint(bool b) { print_ = b; }
 
+  //---
+
+  CLottieFactory *factory() const { return factory_; }
+  void setFactory(CLottieFactory *f) { factory_ = f; }
+
   bool load(const std::string &file);
+
+  void reset();
+
+  //---
 
   CLottieRoot *root() const { return root_; }
 
@@ -1307,9 +1355,14 @@ class CLottie {
 
   CLottieLayer *getLayerById(int id) const;
 
+  //---
+
   void deselectAll();
 
   CMatrix2D getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) const;
+
+  CMatrix2D getRepeaterMatrix(const TimeFrame &timeFrame,
+                              CLottie::Transform *transform, double f) const;
 
  private:
   bool readRoot(const std::string &msg, const CJson::ValueP &value);
@@ -1343,8 +1396,7 @@ class CLottie {
 
   bool readTransform(const std::string &msg1, CJson::ValueP &value1, Transform *transform) const;
 
-  bool readEffect(const std::string &msg, const CJson::ValueP &iValue,
-                  CLottieEffect *effect) const;
+  bool readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *effect);
   bool readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
                        CLottieEffectValue *effectValue) const;
 
@@ -1354,8 +1406,10 @@ class CLottie {
   bool readPointList(const std::string &msg, const CJson::ValueP &iValue,
                      std::vector<CPoint2D> &points) const;
 
+  bool readDash(const std::string &msg, const CJson::ValueP &iValue, Dash &dash) const;
+
   bool readVector(const std::string &msg, const CJson::ValueP &iValue, CPoint2D &p) const;
-  bool readColor (const std::string &msg, const CJson::ValueP &iValue, CRGBA &c) const;
+  bool readColor (const std::string &msg, const CJson::ValueP &iValue, OptColor &c) const;
 
   bool readStrings(const std::string &msg, const CJson::ValueP &iValue,
                    std::vector<std::string> &strs) const;
@@ -1371,19 +1425,50 @@ class CLottie {
   int         valueToInt   (const CJson::ValueP &value, int def=0) const;
   bool        valueToBool  (const CJson::ValueP &value, bool def=false) const;
 
+  CLottieRoot   *makeRoot  ();
+  CLottieLayer  *makeLayer ();
+  CLottieShape  *makeShape ();
+  CLottieAsset  *makeAsset ();
+  CLottieMarker *makeMarker();
+
+  CLottieEffect      *makeEffect();
+  CLottieEffectValue *makeEffectValue();
+
  private:
   bool debug_ { false };
   bool print_ { false };
 
+  CLottieFactory *factory_ { nullptr };
+
   CLottieRoot* root_ { nullptr };
 
-  std::map<std::string, CLottieAsset *> assetIds_;
-  std::map<int        , CLottieLayer *> layerIds_;
-  std::map<int        , CLottieShape *> shapeIds_;
+  using AssetMap = std::map<std::string, CLottieAsset *>;
+  using LayerMap = std::map<int        , CLottieLayer *>;
+  using ShapeMap = std::map<int        , CLottieShape *>;
 
-  std::vector<CLottieLayer *>  layers_;
-  std::vector<CLottieMarker *> markers_;
-  std::vector<CLottieShape *>  shapes_;
+  AssetMap assetIds_;
+  Assets   assets_;
+
+  LayerMap layerIds_;
+  Layers   layers_;
+
+  ShapeMap shapeIds_;
+  Shapes   shapes_;
+
+  Markers markers_;
+};
+
+//---
+
+class CLottieFactory {
+ public:
+  CLottieFactory() { }
+
+  virtual ~CLottieFactory() { }
+
+  virtual CLottieLayer *makeLayer(CLottie *) = 0;
+  virtual CLottieShape *makeShape(CLottie *) = 0;
+  virtual CLottieAsset *makeAsset(CLottie *) = 0;
 };
 
 //---
@@ -1444,8 +1529,8 @@ class CLottieObject {
   const OptStr &name() const { return name_; }
   void setName(const OptStr &s) { name_ = s; }
 
-  const std::string &type() const { return type_; }
-  void setType(const std::string &s) { type_ = s; }
+  const OptStr &type() const { return type_; }
+  void setType(const OptStr &s) { type_ = s; }
 
   const OptInt &typeId() const { return typeId_; }
   void setTypeId(const OptInt &v) { typeId_ = v; }
@@ -1466,6 +1551,8 @@ class CLottieObject {
 
   const CBBox2D &bbox() const { return bbox_; }
   void setBBox(const CBBox2D &v) { bbox_ = v; }
+
+  bool isHierSelected() const;
 
   //---
 
@@ -1492,7 +1579,7 @@ class CLottieObject {
   Type objectType_ { Type::NONE };
 
   OptStr         name_;
-  std::string    type_;
+  OptStr         type_;
   OptInt         typeId_;
   bool           selected_ { false };
   OptBool        hidden_;
@@ -1505,6 +1592,10 @@ class CLottieObject {
 //---
 
 class CLottieRoot : public CLottieObject {
+ public:
+  using Layers = std::vector<CLottieLayer *>;
+  using Assets = std::vector<CLottieAsset *>;
+
  public:
   CLottieRoot(CLottie *l);
  ~CLottieRoot() override;
@@ -1519,14 +1610,14 @@ class CLottieRoot : public CLottieObject {
 
   //---
 
-  double frameRate() const { return timeFrame_.frameRate; }
-  void setFrameRate(double r) { timeFrame_.frameRate = r; }
+  const OptReal &frameRate() const { return timeFrame_.frameRate; }
+  void setFrameRate(const OptReal &r) { timeFrame_.frameRate = r; }
 
-  double frameStart() const { return timeFrame_.frameStart; }
-  void setFrameStart(double r) { timeFrame_.frameStart = r; }
+  const OptReal &frameStart() const { return timeFrame_.frameStart; }
+  void setFrameStart(const OptReal &r) { timeFrame_.frameStart = r; }
 
-  double frameStop() const { return timeFrame_.frameStop; }
-  void setFrameStop(double r) { timeFrame_.frameStop = r; }
+  const OptReal &frameStop() const { return timeFrame_.frameStop; }
+  void setFrameStop(const OptReal &r) { timeFrame_.frameStop = r; }
 
   //---
 
@@ -1541,17 +1632,24 @@ class CLottieRoot : public CLottieObject {
 
   //---
 
-  const std::vector<CLottieLayer *> &layers() const { return layers_; }
-  const std::vector<CLottieAsset *> &assets() const { return assets_; }
+  const Layers &layers() const { return layers_; }
+  const Assets &assets() const { return assets_; }
 
   void addLayer(CLottieLayer *layer) { layers_.push_back(layer); }
   void addAsset(CLottieAsset *asset) { assets_.push_back(asset); }
+
+  const Layers &childLayers() const { return childLayers_; }
 
   //---
 
   CLottieRoot *getRoot() const override { return const_cast<CLottieRoot *>(this); }
 
   CMatrix2D calcTransform(const TimeFrame &) const override { return CMatrix2D::identity(); }
+
+  void buildLayerHier();
+  void printLayerHier() const;
+
+  //---
 
   void printI(const std::string &prefix, bool hier) const override;
 
@@ -1567,13 +1665,18 @@ class CLottieRoot : public CLottieObject {
 
   OptBool threeD_;
 
-  std::vector<CLottieAsset *> assets_;
-  std::vector<CLottieLayer *> layers_;
+  Assets assets_;
+  Layers layers_;
+
+  Layers childLayers_;
 };
 
 //---
 
 class CLottieAsset : public CLottieObject {
+ public:
+  using Layers = std::vector<CLottieLayer *>;
+
  public:
   CLottieAsset(CLottie *l);
  ~CLottieAsset() override;
@@ -1601,7 +1704,7 @@ class CLottieAsset : public CLottieObject {
   const OptBool &embedded() const { return embedded_; }
   void setEmbedded(const OptBool &v) { embedded_ = v; }
 
-  const std::vector<CLottieLayer *> &layers() const { return layers_; }
+  const Layers &layers() const { return layers_; }
 
   void addLayer(CLottieLayer *layer) { layers_.push_back(layer); }
 
@@ -1625,7 +1728,26 @@ class CLottieAsset : public CLottieObject {
   OptStr  path_;
   OptBool embedded_;
 
-  std::vector<CLottieLayer *> layers_;
+  Layers layers_;
+};
+
+//---
+
+// repeater
+struct CLottieRepeater {
+  using ScalarProperty = CLottie::ScalarProperty;
+  using Transform      = CLottie::Transform;
+  using OptInt         = std::optional<int>;
+
+  ScalarProperty copies;
+  ScalarProperty offset;
+  OptInt         composite;
+  Transform*     transform { nullptr };
+
+  ScalarProperty startOpacity;
+  ScalarProperty endOpacity;
+
+  void print(const std::string &prefix="") const;
 };
 
 //---
@@ -1666,6 +1788,8 @@ class CLottieEffect : public CLottieObject {
   using OptInt = std::optional<int>;
   using OptStr = std::optional<std::string>;
 
+  using EffectValues = std::vector<CLottieEffectValue *>;
+
   OptInt type_;
   OptStr match_;
   OptInt index_;
@@ -1673,16 +1797,24 @@ class CLottieEffect : public CLottieObject {
   OptInt numProperties_;
   OptInt enabled_;
 
-  std::vector<CLottieEffectValue *> children_;
+  EffectValues children_;
 };
 
-struct CLottieEffectValue {
+class CLottieEffectValue {
+ public:
+  CLottieEffectValue(CLottie *lottie) :
+   lottie_(lottie) {
+  }
+
+ public:
   using OptInt = std::optional<int>;
   using OptStr = std::optional<std::string>;
 
   using ScalarProperty = CLottie::ScalarProperty;
   using ColorProperty  = CLottie::ColorProperty;
   using VectorProperty = CLottie::VectorProperty;
+
+  CLottie* lottie_ { nullptr };
 
   OptInt type;
   OptStr name;
@@ -1701,6 +1833,9 @@ struct CLottieEffectValue {
 
 class CLottieLayer : public CLottieObject {
  public:
+  using Layers = std::vector<CLottieLayer *>;
+  using Shapes = std::vector<CLottieShape *>;
+
   struct Mask {
     OptStr         mode;
     ScalarProperty opacity;
@@ -1786,11 +1921,11 @@ class CLottieLayer : public CLottieObject {
   const OptStr &css() const { return css_; }
   void setCss(const OptStr &v) { css_ = v; }
 
-  const OptInt &frameIn() const { return frameIn_; }
-  void setFrameIn(const OptInt &v) { frameIn_ = v; }
+  const OptReal &frameIn() const { return frameIn_; }
+  void setFrameIn(const OptReal &v) { frameIn_ = v; }
 
-  const OptInt &frameOut() const { return frameOut_; }
-  void setFrameOut(const OptInt &v) { frameOut_ = v; }
+  const OptReal &frameOut() const { return frameOut_; }
+  void setFrameOut(const OptReal &v) { frameOut_ = v; }
 
   const OptReal &startTime() const { return startTime_; }
   void setStartTime(const OptReal &v) { startTime_ = v; }
@@ -1844,17 +1979,29 @@ class CLottieLayer : public CLottieObject {
     return precomp_;
   }
 
-  const std::vector<CLottieShape *> &shapes() const { return shapes_; }
+  const Shapes &shapes() const { return shapes_; }
 
   void addShape(CLottieShape *shape) { shapes_.push_back(shape); }
+
+  const Layers &childLayers() const { return childLayers_; }
+
+  //---
+
+  void addChildLayer(CLottieLayer *layer) { childLayers_.push_back(layer); }
 
   //---
 
   CLottieRoot *getRoot() const override;
 
   CMatrix2D calcTransform(const TimeFrame &) const override;
-
   CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const override;
+
+  CLottieRepeater *calcRepeater() const;
+  CLottieShape *getRepeaterShape() const;
+
+  //---
+
+  void printLayerHier(const std::string &prefix) const;
 
   void printI(const std::string &prefix, bool hier) const override;
 
@@ -1873,17 +2020,17 @@ class CLottieLayer : public CLottieObject {
   OptInt  matteTarget_;
   OptBool hasMask_;
 
+  OptStr refId_;
+
   OptInt parentInd_;
 
   OptReal width_;
   OptReal height_;
 
-  OptInt  frameIn_;
-  OptInt  frameOut_;
+  OptReal frameIn_;
+  OptReal frameOut_;
   OptReal startTime_;
   OptReal timeStretch_;
-
-  OptStr refId_;
 
   // transform
   Transform *transform_ { nullptr };
@@ -1893,7 +2040,9 @@ class CLottieLayer : public CLottieObject {
   Solid*   solid_   { nullptr };
   Precomp* precomp_ { nullptr };
 
-  std::vector<CLottieShape *> shapes_;
+  Shapes shapes_;
+
+  Layers childLayers_;
 };
 
 //---
@@ -1916,22 +2065,12 @@ class CLottieMarker : public CLottieObject {
 
 class CLottieShape : public CLottieObject {
  public:
+  using Shapes = std::vector<CLottieShape *>;
+  using Dash   = CLottie::Dash;
+
   // rectangle
   struct Rectangle {
     ScalarProperty roundness;
-
-    void print(const std::string &prefix="") const;
-  };
-
-  // repeater
-  struct Repeater {
-    ScalarProperty copies;
-    ScalarProperty offset;
-    OptInt         composite;
-    Transform*     transform { nullptr };
-
-    ScalarProperty startOpacity;
-    ScalarProperty endOpacity;
 
     void print(const std::string &prefix="") const;
   };
@@ -1945,9 +2084,7 @@ class CLottieShape : public CLottieObject {
     OptInt         lineJoin;
     OptReal        miterLimit;
     ScalarProperty miterLimitAnim;
-    OptStr         dashType;
-    OptStr         dashName;
-    ScalarProperty dashValue;
+    Dash           dash;
     OptInt         blendMode;
 
     void print(const std::string &prefix="") const;
@@ -2001,6 +2138,7 @@ class CLottieShape : public CLottieObject {
     OptInt         lineCap;
     OptInt         lineJoin;
     OptReal        miterLimit;
+    Dash           dash;
     ArrayProperty  colors;
 
     void print(const std::string &prefix="") const;
@@ -2049,16 +2187,30 @@ class CLottieShape : public CLottieObject {
 
   CLottieRoot *getRoot() const override;
 
-  CMatrix2D calcTransform(const TimeFrame &) const override;
-
-  CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const override;
-
   CLottieLayer *getParentLayer() const;
   CLottieShape *getParentShape() const;
 
-  const std::vector<CLottieShape *> &shapes() const { return shapes_; }
+  CLottieLayer *getHierParentLayer() const;
+
+  const Shapes &shapes() const { return shapes_; }
 
   void addShape(CLottieShape *shape) { shapes_.push_back(shape); }
+
+  //---
+
+  CMatrix2D calcTransform(const TimeFrame &) const override;
+  CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const override;
+  CLottieShape *getTransformShape() const;
+
+  Fill *calcFill() const;
+  CLottieShape *getFillShape() const;
+
+  CLottieRepeater *calcRepeater() const;
+  CLottieShape *getRepeaterShape() const;
+
+  Merge *calcHierMerge() const;
+  CLottieShape *calcHierMergeShape() const;
+  CLottieShape *getMergeShape() const;
 
   //---
 
@@ -2107,6 +2259,8 @@ class CLottieShape : public CLottieObject {
     return fill_;
   }
 
+  Group* group() const { return group_; }
+
   Group *getGroup() {
     if (! group_)
       group_ = new Group;
@@ -2121,11 +2275,11 @@ class CLottieShape : public CLottieObject {
     return rectangle_;
   }
 
-  Repeater *repeater() const { return repeater_; }
+  CLottieRepeater *repeater() const { return repeater_; }
 
-  Repeater *getRepeater() {
+  CLottieRepeater *getRepeater() {
     if (! repeater_)
-      repeater_ = new Repeater;
+      repeater_ = new CLottieRepeater;
     return repeater_;
   }
 
@@ -2200,19 +2354,19 @@ class CLottieShape : public CLottieObject {
   Stroke* stroke_ { nullptr };
   Fill*   fill_   { nullptr };
 
-  Group*          group_          { nullptr };
-  Rectangle*      rectangle_      { nullptr };
-  Repeater*       repeater_       { nullptr };
-  GradientFill*   gradientFill_   { nullptr };
-  GradientStroke* gradientStroke_ { nullptr };
-  Trim*           trim_           { nullptr };
-  PolyStar*       polyStar_       { nullptr };
-  Merge*          merge_          { nullptr };
-  Rounded*        rounded_        { nullptr };
+  Group*           group_          { nullptr };
+  Rectangle*       rectangle_      { nullptr };
+  CLottieRepeater* repeater_       { nullptr };
+  GradientFill*    gradientFill_   { nullptr };
+  GradientStroke*  gradientStroke_ { nullptr };
+  Trim*            trim_           { nullptr };
+  PolyStar*        polyStar_       { nullptr };
+  Merge*           merge_          { nullptr };
+  Rounded*         rounded_        { nullptr };
 
   //---
 
-  std::vector<CLottieShape *> shapes_;
+  Shapes shapes_;
 };
 
 #endif

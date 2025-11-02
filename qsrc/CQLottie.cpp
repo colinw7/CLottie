@@ -1,24 +1,24 @@
 #include <CQLottie.h>
+#include <CQLottieTree.h>
 #include <CLottie.h>
 #include <CEncode64.h>
 #include <CBezierPath.h>
 #include <CArcToBezier.h>
 
 #include <CQIconButton.h>
-#include <CQColorChooser.h>
-#include <CQRealSpin.h>
+#include <CQColorEdit.h>
+#include <CQUtil.h>
 
-#include <QApplication>
+#include <QTabWidget>
 #include <QPushButton>
 #include <QLabel>
-#include <QCheckBox>
 #include <QLineEdit>
-#include <QMenu>
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPainterPath>
 #include <QKeyEvent>
 #include <QTimer>
+#include <QFileDialog>
 
 #include <iostream>
 #include <set>
@@ -37,17 +37,27 @@ QPointF toQPoint(const CPoint2D &point) {
   return QPointF(point.x, point.y);
 }
 
+CPoint2D toPoint(const QPointF &point) {
+  return CPoint2D(point.x(), point.y());
+}
+
 QRectF toQRect(const CBBox2D &rect) {
   return QRectF(toQPoint(rect.getLL()), toQPoint(rect.getUR())).normalized();
+}
+
+CBBox2D toBBox(const QRectF &rect) {
+  return CBBox2D(toPoint(rect.topLeft()), toPoint(rect.bottomRight()));
 }
 
 QColor toQColor(const CRGBA &color) {
   return QColor(color.getRedI(), color.getGreenI(), color.getBlueI(), color.getAlphaI());
 }
 
+#if 0
 CRGBA toRGBA(const QColor &color) {
   return CRGBA(color.redF(), color.greenF(), color.blueF(), color.alphaF());
 }
+#endif
 
 QTransform toQTransform(const CMatrix2D &m) {
   double a, b, c, d, tx, ty;
@@ -68,18 +78,42 @@ QPainterPath toQPath(const CBezierPath &bezierPath) {
     auto p3 = b.getControlPoint2();
     auto p4 = b.getLastPoint();
 
-    if (first)
+    if (first) {
       path.moveTo(toQPoint(p1));
+
+      first = false;
+    }
 
     path.cubicTo(toQPoint(p2), toQPoint(p3), toQPoint(p4));
 
-    first = false;
+    if (b.isBreak())
+      first = true;
   }
 
   if (bezierPath.isClosed())
     path.closeSubpath();
 
   return path;
+}
+
+CBBox2D transformBBox(const CMatrix2D &m, const CBBox2D &bbox) {
+  if (bbox.isSet()) {
+    CPoint2D p1, p2, p3, p4;
+
+    m.multiplyPoint(bbox.getLL(), p1);
+    m.multiplyPoint(bbox.getLR(), p2);
+    m.multiplyPoint(bbox.getUL(), p3);
+    m.multiplyPoint(bbox.getUR(), p4);
+
+    CBBox2D bbox1(p1, p2);
+
+    bbox1 += p3;
+    bbox1 += p4;
+
+    return bbox1;
+  }
+  else
+    return bbox;
 }
 
 Qt::PenCapStyle toLineCap(int lineCap) {
@@ -98,6 +132,14 @@ Qt::PenJoinStyle toLineJoin(int lineJoin) {
     case 2: return Qt::RoundJoin;
     case 3: return Qt::BevelJoin;
   }
+}
+
+std::optional<double> combineOpacities(const std::optional<double> &o1,
+                                       const std::optional<double> &o2)
+{
+  if (! o1) return o2;
+  if (! o2) return o1;
+  return 100.0*((o1.value()/100.0)*(o2.value()/100.0));
 }
 
 void errOnce(uint id, const std::string &msg) {
@@ -120,92 +162,41 @@ void warnOnce(uint id, const std::string &msg) {
 
 //---
 
-int
-main(int argc, char **argv)
-{
-  QApplication app(argc, argv);
-
-  std::string filename;
-  bool        debug = false;
-  bool        print = false;
-
-  for (auto i = 1; i < argc; ++i) {
-    if (argv[i][0] == '-') {
-      auto arg = std::string(&argv[i][1]);
-
-      if      (arg == "debug")
-        debug = true;
-      else if (arg == "print")
-        print = true;
-      else
-        std::cerr << "Unhandled option: " << arg << "\n";
-    }
-    else
-      filename = argv[i];
+class CQLottieFactory : public CLottieFactory {
+ public:
+  CQLottieFactory(CQLottie *lottie) :
+   lottie_(lottie) {
   }
 
-  if (filename == "")
-    exit(1);
-
-  auto *lottie = new CQLottie;
-
-  lottie->setDebug(debug);
-  lottie->setPrint(print);
-
-  if (! lottie->load(filename)) {
-    std::cerr << "Failed to load '" << filename << "'\n";
-    exit(1);
+  CLottieAsset *makeAsset(CLottie *) override {
+    return new CQLottieAsset(lottie_);
   }
 
-  lottie->show();
+  CLottieLayer *makeLayer(CLottie *) override {
+    return new CQLottieLayer(lottie_);
+  }
 
-  return app.exec();
-}
+  CLottieShape *makeShape(CLottie *) override {
+    return new CQLottieShape(lottie_);
+  }
+
+ private:
+  CQLottie *lottie_ { nullptr };
+};
 
 //---
 
 CQLottie::
 CQLottie()
 {
-  auto addToolButton = [&](const QString &name, const QString &iconName,
-                           const QString &tip, const char *slotName) {
-    auto *button = new CQIconButton;
-
-    button->setObjectName(name);
-    button->setIcon(iconName);
-    button->setIconSize(QSize(32, 32));
-    button->setAutoRaise(true);
-    button->setToolTip(tip);
-
-    connect(button, SIGNAL(clicked()), this, slotName);
-
-    return button;
-  };
-
   auto *layout = new QVBoxLayout(this);
   layout->setMargin(0); layout->setSpacing(0);
 
-  toolbar_ = new QFrame;
-  toolbar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  //---
+
+  toolbar_ = new CQLottieToolBar(this);
 
   layout->addWidget(toolbar_);
-
-  auto *tlayout = new QHBoxLayout(toolbar_);
-
-  auto *playButton  = addToolButton("play" , "PLAY"    , "Play" , SLOT(playSlot()));
-  auto *pauseButton = addToolButton("pause", "PAUSE"   , "Pause", SLOT(pauseSlot()));
-  auto *stepButton  = addToolButton("step" , "PLAY_ONE", "Step" , SLOT(stepSlot()));
-
-  tlayout->addWidget(playButton);
-  tlayout->addWidget(pauseButton);
-  tlayout->addWidget(stepButton);
-
-  auto *loadButton = new QPushButton("Load");
-
-  connect(loadButton, SIGNAL(clicked()), this, SLOT(loadSlot()));
-
-  tlayout->addStretch(1);
-  tlayout->addWidget(loadButton);
 
   //---
 
@@ -230,17 +221,37 @@ CQLottie()
   controlFrame->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 
   auto *controlLayout = new QVBoxLayout(controlFrame);
-  controlLayout->setMargin(0); clayout->setSpacing(0);
+  controlLayout->setMargin(0); controlLayout->setSpacing(0);
 
   clayout->addWidget(controlFrame);
 
+  auto *tab = new QTabWidget;
+
+  controlLayout->addWidget(tab);
+
+  //---
+
+  auto *objectFrame = new QFrame;
+  objectFrame->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+
+  auto *objectLayout = new QVBoxLayout(objectFrame);
+  objectLayout->setMargin(0); objectLayout->setSpacing(0);
+
   tree_ = new CQLottieTree(this);
 
-  controlLayout->addWidget(tree_);
+  objectLayout->addWidget(tree_);
 
   objectTree_ = new CQLottieObjectTree(this);
 
-  controlLayout->addWidget(objectTree_);
+  objectLayout->addWidget(objectTree_);
+
+  tab->addTab(objectFrame, "Objects");
+
+  //---
+
+  settings_ = new CQLottieSettings(this);
+
+  tab->addTab(settings_, "Settings");
 
   //---
 
@@ -261,6 +272,8 @@ CQLottie()
   //---
 
   lottie_ = new CLottie;
+
+  lottie_->setFactory(new CQLottieFactory(this));
 
   //---
 
@@ -298,7 +311,7 @@ load(const std::string &filename)
 //displayRange_.setEqualScale(true);
   displayRange_.setWindowRange(0, 0, w, h);
 
-  fps_ = std::max(root->frameRate(), 1.0);
+  fps_ = std::max(root->frameRate().value_or(1.0), 1.0);
 
   dt_ = 1000.0/fps_;
 
@@ -322,6 +335,24 @@ void
 CQLottie::
 loadSlot()
 {
+  auto dir = ".";
+
+  auto fileName = QFileDialog::getOpenFileName(this, "Open Model File", dir, "Files (*.json)");
+  if (! fileName.length()) return;
+
+  if (! load(fileName.toStdString()))
+    std::cerr << "Failed to load file\n";
+
+  updateAll();
+}
+
+void
+CQLottie::
+updateAll()
+{
+  update();
+
+  canvas_->invalidate();
 }
 
 void
@@ -378,35 +409,158 @@ tickSlot()
   ticksLabel_->setText(QString("Frame: %1 (%2 secs)").arg(ticks_).arg(secs_));
 
   update();
+
+  canvas_->invalidate();
 }
 
 void
 CQLottie::
-draw(QPainter *painter)
+draw(QPainter *painter, bool update)
 {
   const auto *root = lottie_->root();
+  if (! root) return;
 
-  drawRoot(painter, root);
+  DrawState drawState;
+
+  drawState.painter = painter;
+
+#if 0
+  drawState.displayRanges.push_back(displayRange_);
+#else
+  drawState.displayRange = displayRange_;
+#endif
+
+  getTimeFrame(drawState.timeFrame);
+
+  drawRoot(drawState, root, update);
 }
 
 void
 CQLottie::
-drawRoot(QPainter *painter, const CLottieRoot *root)
+drawRoot(const DrawState &drawState, const CLottieRoot *root, bool update)
 {
   if (root->hidden().value_or(false))
     return;
 
-  DrawState drawState;
+  auto bbox = root->bbox();
 
-  getTimeFrame(drawState.timeFrame);
+  drawChildLayers(drawState, root->childLayers(), update);
 
-#if 1
-  for (auto it = root->layers().rbegin(); it != root->layers().rend(); ++it)
-    drawLayer(painter, drawState, *it);
+  for (auto *layer : root->childLayers())
+    bbox += layer->bbox();
+
+  const_cast<CLottieRoot *>(root)->setBBox(bbox);
+}
+
+void
+CQLottie::
+drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool update)
+{
+  if (isDoubleBuffer()) {
+    if (update) {
+      for (auto *layer : childLayers) {
+        auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
+        qlayer->setDoubleBuffer(true);
+
+        drawLayer(drawState, layer, update);
+      }
+    }
+
+    for (auto it = childLayers.rbegin(); it != childLayers.rend(); ++it) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+
+      if (qlayer->isEnabled() && qlayer->isChanged()) {
+        drawState.painter->drawImage(0, 0, qlayer->image());
+
+        drawState.layer->setChanged(true);
+      }
+    }
+  }
+  else {
+    CQLottieLayer *matteLayer = nullptr;
+
+    for (auto *layer : childLayers) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
+      if (qlayer->matteTarget()) {
+        qlayer->setDoubleBuffer(true);
+
+        drawLayer(drawState, qlayer, update);
+
+        matteLayer = qlayer;
+
+        continue;
+      }
+
+      if (qlayer->matteMode()) {
+        qlayer->setDoubleBuffer(true);
+
+        drawLayer(drawState, qlayer, update);
+
+        qlayer->setMatteLayer(matteLayer);
+      }
+
+      matteLayer = nullptr;
+    }
+
+    for (auto it = childLayers.rbegin(); it != childLayers.rend(); ++it) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+
+      if (qlayer->matteTarget())
+        continue;
+
+      if (qlayer->matteMode()) {
+        if (qlayer->matteLayer()) {
+          auto matteImage = matteLayerImage(qlayer, qlayer->matteLayer());
+
+          drawState.painter->drawImage(0, 0, matteImage);
+        }
+      }
+      else {
+        drawLayer(drawState, qlayer, update);
+      }
+    }
+  }
+}
+
+QImage
+CQLottie::
+matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer) const
+{
+  int iw = layer->image().width ();
+  int ih = layer->image().height();
+
+  auto matteImage = QImage(iw, ih, QImage::Format_ARGB32);
+
+  const auto &layerImage = layer->image();
+  const auto &clipImage  = clipLayer->image();
+
+  matteImage.fill(0);
+
+#if 0
+  assert(clipLayer->image().width () == iw);
+  assert(clipLayer->image().height() == ih);
+
+  QPainter mattePainter(&matteImage);
+
+  //mattePainter.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+
+//mattePainter.drawImage(0, 0, clipImage);
+  mattePainter.drawImage(0, 0, layerImage);
 #else
-  for (auto *layer : root->layers())
-    drawLayer(painter, drawState, layer);
+  for (int y = 0; y < ih; ++y) {
+    for (int x = 0; x < iw; ++x) {
+      auto c = clipImage.pixelColor(x, y);
+
+      if (c.alpha() > 0) {
+        matteImage.setPixelColor(x, y, layerImage.pixelColor(x, y));
+      }
+    }
+  }
 #endif
+
+  return matteImage;
 }
 
 void
@@ -424,35 +578,56 @@ getTimeFrame(CLottieUtil::TimeFrame &timeFrame) const
 
 void
 CQLottie::
-drawLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer)
+drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 {
   if (layer->hidden().value_or(false))
     return;
 
-  if (layer->frameIn() && int(drawState.timeFrame.frame) < layer->frameIn().value())
-    return;
+  int frame = int(drawState.timeFrame.frame) + drawState.frameDelta;
 
-  if (layer->frameOut() && int(drawState.timeFrame.frame) > layer->frameOut().value())
-    return;
+  if (layer->frameIn()) {
+    if (frame < layer->frameIn().value())
+      return;
+  }
+
+  if (layer->frameOut()) {
+    if (frame > layer->frameOut().value())
+      return;
+  }
 
   //---
 
   auto drawState1 = drawState;
 
-  drawState1.matrix = drawState.preMatrix*getLayerMatrix(drawState, layer);
+  drawState1.objects.push_front(layer);
+
+  drawState1.matrix = getLayerMatrix(drawState, layer);
+
+  //---
+
+  auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
+  qlayer->resize(canvas_->width(), canvas_->height());
+
+  if (qlayer->isDoubleBuffer()) {
+    drawState1.painter = qlayer->painter();
+    drawState1.layer   = qlayer;
+
+    qlayer->setChanged(false);
+  }
 
   //---
 
   auto typeId = layer->typeId().value_or(-1);
 
   if      (typeId == 0) { // Precomposition Layer
-    drawPrecompLayer(painter, drawState1, layer);
+    drawPrecompLayer(drawState1, layer);
   }
   else if (typeId == 1) { // Solid Layer
-    drawSolidLayer(painter, drawState1, layer);
+    drawSolidLayer(drawState1, layer);
   }
   else if (typeId == 2) { // Image Layer
-    drawImageLayer(painter, drawState1, layer);
+    drawImageLayer(drawState1, layer);
   }
   else if (typeId == 3) { // Null Layer
   }
@@ -462,121 +637,233 @@ drawLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *lay
     warnOnce(__LINE__, "Invalid layer type id: " + std::to_string(typeId));
   }
 
-  drawLayerShapes(painter, drawState1, layer);
+  drawLayerShapes(drawState1, layer);
 
 #if 0
-  drawLayerAssets(painter, drawState1, layer);
+  drawLayerAssets(drawState.painter, drawState1, layer);
 #endif
+
+  drawChildLayers(drawState1, layer->childLayers(), update);
+
+  //---
+
+  auto bbox = layer->bbox();
+
+  for (auto *layer : layer->childLayers())
+    bbox += layer->bbox();
+
+  for (auto *shape : layer->shapes())
+    bbox += shape->bbox();
+
+  layer->setBBox(bbox);
+
+  //---
+
+  if (layer->isHierSelected()) {
+    if (layer->bbox().isSet()) {
+      auto displayMatrix = drawState.getDisplayMatrix();
+
+      drawState.painter->setTransform(toQTransform(displayMatrix));
+
+      setBBoxPenBrush(drawState.painter);
+
+      drawState.painter->drawRect(toQRect(layer->bbox()));
+    }
+  }
 }
 
 void
 CQLottie::
-drawLayerShapes(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer)
+drawLayerShapes(DrawState &drawState, const CLottieLayer *layer)
 {
+  bool isMerge = bool(drawState.merge);
+
   auto drawState1 = drawState;
 
-  drawState1.merge.reset();
+//drawState1.merge.reset();
 //drawState1.trim .reset();
 
 #if 1
+  auto *repeater = layer->calcRepeater();
+
   for (auto it = layer->shapes().rbegin(); it != layer->shapes().rend(); ++it) {
-    if (drawState1.repeat) {
+    auto *qshape = dynamic_cast<CQLottieShape *>(*it);
+
+    if (repeater) {
       auto drawState2 = drawState1;
 
-      auto matrix = getTransformMatrix(drawState, drawState1.repeat->transform);
+      // model::Repeater::Transform::matrix ?
+#if 0
+      auto matrix = getTransformMatrix(drawState2, repeater->transform);
+#endif
+      auto repeatCopies = int(repeater->copies.tvalue(drawState2.timeFrame, 1.0).value());
+#if 0
+      auto repeatOffset = repeater->offset.tvalue(drawState.timeFrame, 0.0).value();
 
-      for (int i = 0; i < drawState1.repeat->copies; ++i) {
-        drawState2.preMatrix = matrix*drawState2.preMatrix;
+      auto repeatStartOpacity = repeater->startOpacity.tvalue(drawState.timeFrame, 100.0).value();
+      auto repeatEndOpacity   = repeater->endOpacity  .tvalue(drawState.timeFrame, 100.0).value();
+#endif
 
-        drawShape(painter, drawState2, *it);
+      for (int i = 0; i < repeatCopies; ++i) {
+#if 1
+        drawState2.repeatInd = i;
+
+#if 0
+        drawState2.repeatOpacity =
+          CMathUtil::map(i, 0, repeatCopies - 1, repeatStartOpacity, repeatEndOpacity);
+
+        double mult = i + repeatOffset;
+
+        drawState2.repeatMatrix =
+          lottie_->getRepeaterMatrix(drawState1.timeFrame, repeater->transform, mult);
+#endif
+#endif
+
+        drawShape(drawState2, qshape);
       }
     }
     else
-      drawShape(painter, drawState1, *it);
+      drawShape(drawState1, qshape);
   }
 #else
   for (auto *shape : layer->shapes) {
-    drawShape(painter, drawState1, shape);
+    drawShape(drawState.painter, drawState1, shape);
   }
 #endif
 
   //---
 
-  drawMergeShapes(painter, drawState1);
+  if (drawState1.merge) {
+    if (! isMerge)
+      drawMergeShapes(drawState1);
+    else {
+      for (const auto &bezierPath : drawState1.merge->paths)
+        drawState.merge->paths.push_back(bezierPath);
+    }
+  }
 }
 
 void
 CQLottie::
-drawMergeShapes(QPainter *painter, const DrawState &drawState)
+drawMergeShapes(DrawState &drawState)
 {
-  if (! drawState.merge)
-    return;
-
   int np = drawState.merge->paths.size();
   if (np <= 0) return;
 
   //---
 
-  auto path = drawState.merge->paths[0];
+  QPainterPath path;
 
-  for (int i = 1; i < np; ++i) {
-    if      (drawState.merge->mode == 0) {
+  if      (drawState.merge->mode == 1) {
+    auto bezierPath = drawState.merge->paths[0];
+
+    for (int i = 1; i < np; ++i) {
+      const auto &bezierPath1 = drawState.merge->paths[i];
+
+      bezierPath.combine(bezierPath1);
     }
-    else if (drawState.merge->mode == 1) {
-      path = path.united(drawState.merge->paths[i]);
+
+    path = toQPath(bezierPath);
+  }
+  else if (drawState.merge->mode == 2 ||
+           drawState.merge->mode == 3 ||
+           drawState.merge->mode == 4) {
+    const auto &bezierPath = drawState.merge->paths[0];
+
+    path = toQPath(bezierPath);
+
+    for (int i = 1; i < np; ++i) {
+      const auto &bezierPath1 = drawState.merge->paths[i];
+
+      auto path1 = toQPath(bezierPath1);
+
+      if      (drawState.merge->mode == 2) {
+        path = path.united(path1);
+      }
+      else if (drawState.merge->mode == 3) {
+        path = path.subtracted(path1);
+      }
+      else if (drawState.merge->mode == 4) {
+        path = path.intersected(path1);
+      }
     }
-    else if (drawState.merge->mode == 2) {
-      path = path.subtracted(drawState.merge->paths[i]);
-    }
-    else if (drawState.merge->mode == 3) {
-      path = path.intersected(drawState.merge->paths[i]);
-    }
-    else if (drawState.merge->mode == 4) {
-      std::cerr << "merge mode 4 unimplemented\n";
-    }
-    else {
-      std::cerr << "invalid merge mode " << drawState.merge->mode << "\n";
-    }
+  }
+  else {
+    std::cerr << "invalid merge mode " << drawState.merge->mode << "\n";
   }
 
   //---
+
+  auto *fill = drawState.merge->shape->calcFill();
+
+  if (fill) {
+    if (fill->color.isSet())
+      drawState.fill.color = fill->color.tvalue(drawState.timeFrame);
+
+    if (fill->opacity.isSet())
+      drawState.fill.opacity = fill->opacity.tvalue(drawState.timeFrame);
+
+    if (fill->fillRule)
+      drawState.fill.rule = fill->fillRule.value();
+  }
+
+  //---
+
+  Qt::FillRule fillRule;
 
   if (drawState.fill.rule == 2)
-    path.setFillRule(Qt::OddEvenFill);
+    fillRule = Qt::OddEvenFill;
   else
-    path.setFillRule(Qt::WindingFill);
+    fillRule = Qt::WindingFill;
+
+  path.setFillRule(fillRule);
 
   //---
 
-  painter->save();
+  drawState.painter->save();
 
   //---
 
-  auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
+  auto pmatrix = drawState.getDisplayMatrix();
+  auto smatrix = getShapeMatrix(drawState, drawState.merge->shape);
 
-  painter->setTransform(toQTransform(pmatrix));
+  auto dmatrix = pmatrix*smatrix;
 
-  setPenBrush(painter, drawState, drawState.merge->shape);
+  auto pbbox = toBBox(path.boundingRect());
 
-  painter->drawPath(path);
+  auto bbox = transformBBox(smatrix, pbbox);
+
+  drawState.painter->setTransform(toQTransform(dmatrix));
+
+  setPenBrush(drawState, drawState.merge->shape);
+
+  drawState.painter->drawPath(path);
+
+  const_cast<CLottieShape *>(drawState.merge->shape)->setBBox(bbox);
 
   //---
 
-  if (drawState.merge->shape->selected()) {
-    setSelectedPenBrush(painter);
+  if (drawState.merge->shape->isHierSelected()) {
+    setSelectedPenBrush(drawState.painter);
 
-    painter->drawPath(path);
+    drawState.painter->drawPath(path);
   }
 
   //---
 
-  painter->restore();
+  drawState.painter->restore();
+
+  if (drawState.layer)
+    drawState.layer->setChanged(true);
+
+  //---
+
 }
 
 #if 0
 void
 CQLottie::
-drawLayerAssets(QPainter *painter, DrawState &drawState, const CLottieLayer *layer)
+drawLayerAssets(DrawState &drawState, const CLottieLayer *layer)
 {
   CLottieAsset *asset = nullptr;
 
@@ -590,33 +877,81 @@ drawLayerAssets(QPainter *painter, DrawState &drawState, const CLottieLayer *lay
   if (! asset)
     return;
 
-  drawAsset(painter, drawState, asset);
+  drawAsset(drawState, asset);
 }
 #endif
 
 void
 CQLottie::
-drawAsset(QPainter *painter, const DrawState &drawState, const CLottieAsset *asset)
+drawAsset(const DrawState &drawState, CLottieAsset *asset)
 {
   if (asset->layers().empty())
     return;
 
+  //---
+
   auto drawState1 = drawState;
 
-  drawState1.preMatrix = drawState.matrix;
+  drawState1.objects.push_front(asset);
 
-#if 1
-  for (auto it = asset->layers().rbegin(); it != asset->layers().rend(); ++it)
-    drawLayer(painter, drawState1, *it);
-#else
+  //---
+
+  bool update = false;
+
+  if (isDoubleBuffer()) {
+    for (auto *layer : asset->layers()) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
+      qlayer->setDoubleBuffer(true);
+
+      drawLayer(drawState1, layer, update);
+    }
+
+    for (auto it = asset->layers().rbegin(); it != asset->layers().rend(); ++it) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+
+      if (qlayer->isEnabled() && qlayer->isChanged()) {
+        drawState.painter->drawImage(0, 0, qlayer->image());
+
+        drawState.layer->setChanged(true);
+      }
+    }
+  }
+  else {
+    for (auto it = asset->layers().rbegin(); it != asset->layers().rend(); ++it) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+
+      drawLayer(drawState1, qlayer, update);
+    }
+  }
+
+  //---
+
+  CBBox2D bbox;
+
   for (auto *layer : asset->layers())
-    drawLayer(painter, drawState1, layer);
-#endif
+    bbox += layer->bbox();
+
+  const_cast<CLottieAsset *>(asset)->setBBox(bbox);
+
+  //---
+
+  if (asset->isHierSelected()) {
+    if (asset->bbox().isSet()) {
+      auto displayMatrix = drawState.getDisplayMatrix();
+
+      drawState.painter->setTransform(toQTransform(displayMatrix));
+
+      setBBoxPenBrush(drawState.painter);
+
+      drawState.painter->drawRect(toQRect(asset->bbox()));
+    }
+  }
 }
 
 void
 CQLottie::
-drawPrecompLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer)
+drawPrecompLayer(const DrawState &drawState, const CLottieLayer *layer)
 {
   //warnOnce(__LINE__, "Unhandled precomposition layer type");
 
@@ -639,14 +974,40 @@ drawPrecompLayer(QPainter *painter, const DrawState &drawState, const CLottieLay
 
   DrawState drawState1 = drawState;
 
-  drawState1.preMatrix = getLayerMatrix(drawState, layer);
+  if (layer->frameIn())
+    drawState1.frameDelta -= layer->frameIn().value();
 
-  drawAsset(painter, drawState1, asset);
+#if 0
+  const auto &parentDisplayRange = drawState1.displayRanges.back();
+
+  double pxmin, pymin, pxmax, pymax;
+  parentDisplayRange.getWindowRange(&pxmin, &pymin, &pxmax, &pymax);
+
+  CDisplayRange2D displayRange;
+  displayRange.setPixelRange(pxmin, pymax, pxmax, pymin);
+
+  displayRange.setWindowRange(0, 0,
+    precomp->width.value_or(100), precomp->height.value_or(100));
+
+  drawState1.displayRanges.push_back(displayRange);
+#endif
+
+  drawAsset(drawState1, asset);
+
+  auto bbox = asset->bbox();
+
+#if 0
+  auto m = getTransformMatrix(drawState, layer->transform());
+
+  const_cast<CLottieLayer *>(layer)->setBBox(transformBBox(m, bbox));
+#else
+  const_cast<CLottieLayer *>(layer)->setBBox(bbox);
+#endif
 }
 
 void
 CQLottie::
-drawSolidLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer)
+drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
 {
   //warnOnce(__LINE__, "Unhandled shape layer type");
 
@@ -657,45 +1018,51 @@ drawSolidLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer
   auto w = solid->width .value_or(layer->width ().value_or(0));
   auto h = solid->height.value_or(layer->height().value_or(0));
 
-  if (w > 0 && h > 0) {
-    auto p1 = CPoint2D(    0,     0);
-    auto p2 = CPoint2D(w - 1, h - 1);
+  if (w <= 0 || h <= 0)
+    return;
 
-    auto bbox = CBBox2D(p1, p2);
+  auto p1 = CPoint2D(    0,     0);
+  auto p2 = CPoint2D(w - 1, h - 1);
 
-    //---
+  auto bbox = CBBox2D(p1, p2);
 
-    painter->save();
+  const_cast<CLottieLayer *>(layer)->setBBox(bbox);
 
-    auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
+  //---
 
-    painter->setTransform(toQTransform(pmatrix));
+  drawState.painter->save();
 
-    auto color = solid->color.value_or(CRGBA(0, 0, 0));
+  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix;
 
-    painter->setPen  (toQColor(color));
-    painter->setBrush(toQColor(color));
+  drawState.painter->setTransform(toQTransform(pmatrix));
 
-    if (layer->mask()) {
-      auto *mask = layer->mask();
+  auto color = solid->color.value_or(CRGBA(0, 0, 0));
 
-      CBezierPath bezierPath;
-      pathToBezier(mask->path, drawState, bezierPath);
+  drawState.painter->setPen  (toQColor(color));
+  drawState.painter->setBrush(toQColor(color));
 
-      auto ppath = toQPath(bezierPath);
+  if (layer->mask()) {
+    auto *mask = layer->mask();
 
-      painter->setClipPath(ppath);
-    }
+    CBezierPath bezierPath;
+    pathToBezier(mask->path, drawState, bezierPath);
 
-    painter->drawRect(toQRect(bbox));
+    auto ppath = toQPath(bezierPath);
 
-    painter->restore();
+    drawState.painter->setClipPath(ppath);
   }
+
+  drawState.painter->drawRect(toQRect(bbox));
+
+  drawState.painter->restore();
+
+  if (drawState.layer)
+    drawState.layer->setChanged(true);
 }
 
 void
 CQLottie::
-drawImageLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer)
+drawImageLayer(const DrawState &drawState, const CLottieLayer *layer)
 {
   CLottieAsset *asset = nullptr;
 
@@ -752,45 +1119,49 @@ drawImageLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer
   }
 
   auto image = (*pi).second;
+  if (image.isNull()) return;
 
-  if (! image.isNull()) {
-    int w = asset->width ().value_or(100);
-    int h = asset->height().value_or(100);
+  int w = asset->width ().value_or(100);
+  int h = asset->height().value_or(100);
 
-    auto p1 = CPoint2D(    0,     0);
-    auto p2 = CPoint2D(w - 1, h - 1);
+  auto p1 = CPoint2D(    0,     0);
+  auto p2 = CPoint2D(w - 1, h - 1);
 
-    auto bbox = CBBox2D(p1, p2);
+  auto bbox = CBBox2D(p1, p2);
 
-    //---
+  //---
 
-    painter->save();
+  drawState.painter->save();
 
-    auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
+  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix;
 
-    painter->setTransform(toQTransform(pmatrix));
+  drawState.painter->setTransform(toQTransform(pmatrix));
 
-    painter->drawImage(toQRect(bbox), image);
+  drawState.painter->drawImage(toQRect(bbox), image);
 
-    painter->restore();
-  }
+  drawState.painter->restore();
+
+  if (drawState.layer)
+    drawState.layer->setChanged(true);
 }
 
 void
 CQLottie::
-drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
+drawShape(DrawState &drawState, CLottieShape *shape)
 {
   if (shape->hidden().value_or(false))
     return;
 
-  auto type = shape->type();
+  //---
+
+  auto type = shape->type().value_or("");
 
   auto unhandledShape = [&](const std::string &msg) {
     warnOnce(__LINE__, "Unhandled shape: " + msg + "(" + type + ")");
   };
 
   if      (type == "el") { // ellipse
-    drawEllipse(painter, drawState, shape);
+    drawEllipse(drawState, shape);
   }
   else if (type == "fl") { // fill
     drawState.fill.shape = shape;
@@ -802,22 +1173,22 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
     //unhandledShape("fill");
   }
   else if (type == "gf") { // gradient fill
-    gradientFill(drawState, shape);
+    gradientFillShape(drawState, shape);
   }
   else if (type == "gs") { // gradient stroke
-    gradientStroke(drawState, shape);
+    gradientStrokeShape(drawState, shape);
   }
   else if (type == "gr") { // group
     //unhandledShape("gr : group");
   }
   else if (type == "sh") { // path
-    drawPath(painter, drawState, shape);
+    drawPath(drawState, shape);
   }
   else if (type == "sr") { // polystar
-    drawPolystar(painter, drawState, shape);
+    drawPolystar(drawState, shape);
   }
   else if (type == "rc") { // rectangle
-    drawRectangle(painter, drawState, shape);
+    drawRectangle(drawState, shape);
   }
   else if (type == "st") { // stroke
     drawState.stroke.shape = shape;
@@ -835,7 +1206,7 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
   else if (type == "tr") { // transform shape
     drawState.transform.shapes.push_back(shape);
 
-    drawState.matrix = drawState.preMatrix*getShapeMatrix(drawState, shape);
+    drawState.matrix = getShapeMatrix(drawState, shape);
   }
   else if (type == "tm") { // trim path
     //unhandledShape("trim path");
@@ -864,7 +1235,8 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
     if (shape->merge() && shape->merge()->mode) {
       DrawState::Merge merge;
 
-      merge.mode = shape->merge()->mode.value();
+      merge.shape = shape;
+      merge.mode  = shape->merge()->mode.value();
 
       drawState.merge = merge;
     }
@@ -873,6 +1245,7 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
     //unhandledShape("repeater");
 
     if (shape->repeater()) {
+#if 0
       auto *repeater = shape->repeater();
 
       DrawState::Repeat repeat;
@@ -881,19 +1254,20 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
       repeat.offset       = repeater->offset.tvalue(drawState.timeFrame, 0.0).value();
       repeat.composite    = repeater->composite.value_or(0);
       repeat.transform    = repeater->transform;
-      repeat.startOpacity = repeater->startOpacity.tvalue(drawState.timeFrame, 100.0).value()/100.0;
-      repeat.endOpacity   = repeater->endOpacity  .tvalue(drawState.timeFrame, 100.0).value()/100.0;
+      repeat.startOpacity = repeater->startOpacity.tvalue(drawState.timeFrame, 100.0).value();
+      repeat.endOpacity   = repeater->endOpacity  .tvalue(drawState.timeFrame, 100.0).value();
 
 #if 0
-      auto matrix = getTransformMatrix(drawState, repeat.transform);
-
-      std::cerr << "copies: " << repeat.copies << "\n";
-      std::cerr << "offset: " << repeat.offset << "\n";
-      std::cerr << "composite: " << repeat.composite << "\n";
-      std::cerr << "matrix: " << matrix << "\n";
+      std::cerr << "repeat.copies: " << repeat.copies << "\n";
+      std::cerr << "repeat.offset: " << repeat.offset << "\n";
+      std::cerr << "repeat.composite: " << repeat.composite << "\n";
+      std::cerr << "repeat.matrix: " << getTransformMatrix(drawState, repeat.transform) << "\n";
+      std::cerr << "repeat.startOpacity: " << repeat.startOpacity << "\n";
+      std::cerr << "repeat.endOpacity: " << repeat.endOpacity << "\n";
 #endif
 
       drawState.repeat = repeat;
+#endif
     }
   }
   else {
@@ -902,37 +1276,59 @@ drawShape(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
 
   //---
 
-  auto drawState1 = drawState;
+  if (! shape->shapes().empty()) {
+    bool isMerge = bool(drawState.merge);
 
-  drawState1.merge.reset();
-//drawState1.trim .reset();
+    auto drawState1 = drawState;
 
-  //---
+    drawState1.objects.push_front(shape);
+
+  //drawState1.merge.reset();
+  //drawState1.trim .reset();
+
+    //---
 
 #if 1
-  for (auto it = shape->shapes().rbegin(); it != shape->shapes().rend(); ++it)
-    drawShape(painter, drawState1, *it);
+    for (auto it = shape->shapes().rbegin(); it != shape->shapes().rend(); ++it)
+      drawShape(drawState1, *it);
 #else
-  for (auto *shape : shape->shapes)
-    drawShape(painter, drawState1, shape);
+    for (auto *shape : shape->shapes)
+      drawShape(drawState1, shape);
 #endif
 
-  //---
+    //---
 
-  drawMergeShapes(painter, drawState1);
+    if (drawState1.merge) {
+      if (! isMerge)
+        drawMergeShapes(drawState1);
+      else {
+        for (const auto &bezierPath : drawState1.merge->paths)
+          drawState.merge->paths.push_back(bezierPath);
+      }
+    }
+
+    //---
+
+    auto bbox = shape->bbox();
+
+    for (auto *shape1 : shape->shapes())
+      bbox += shape1->bbox();
+
+    const_cast<CLottieShape *>(shape)->setBBox(bbox);
+  }
 }
 
 void
 CQLottie::
-gradientFill(DrawState &drawState, const CLottieShape *shape)
+gradientFillShape(DrawState &drawState, const CLottieShape *shape)
 {
   //unhandledShape("gradient fill");
 
   auto *gradientFill = shape->gradientFill();
   if (! gradientFill) return;
 
-  auto startPoint = gradientFill->startPoint.tvalue(drawState.timeFrame, CPoint2D(0, 0));
-  auto endPoint   = gradientFill->endPoint  .tvalue(drawState.timeFrame, CPoint2D(0, 0));
+  auto startPoint = gradientFill->startPoint.tvalue(drawState.timeFrame, CPoint2D(0, 0)).value();
+  auto endPoint   = gradientFill->endPoint  .tvalue(drawState.timeFrame, CPoint2D(0, 0)).value();
 
 //std::cerr << startPoint << " " << endPoint << "\n";
 
@@ -959,15 +1355,15 @@ gradientFill(DrawState &drawState, const CLottieShape *shape)
 
 void
 CQLottie::
-gradientStroke(DrawState &drawState, const CLottieShape *shape)
+gradientStrokeShape(DrawState &drawState, const CLottieShape *shape)
 {
   //unhandledShape("gradient stroke");
 
   auto *gradientStroke = shape->gradientStroke();
   if (! gradientStroke) return;
 
-  auto startPoint = gradientStroke->startPoint.tvalue(drawState.timeFrame, CPoint2D(0, 0));
-  auto endPoint   = gradientStroke->endPoint  .tvalue(drawState.timeFrame, CPoint2D(0, 0));
+  auto startPoint = gradientStroke->startPoint.tvalue(drawState.timeFrame, CPoint2D(0, 0)).value();
+  auto endPoint   = gradientStroke->endPoint  .tvalue(drawState.timeFrame, CPoint2D(0, 0)).value();
 
 //std::cerr << startPoint << " " << endPoint << "\n";
 
@@ -1001,48 +1397,16 @@ gradientStroke(DrawState &drawState, const CLottieShape *shape)
 
 void
 CQLottie::
-drawEllipse(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
+drawEllipse(DrawState &drawState, const CLottieShape *shape)
 {
-  auto positionxy = shape->pos().tvalue(drawState.timeFrame, CLottie::XYVals());
+  auto positionxy = shape->pos().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
   auto position   = positionxy.toPoint(CPoint2D(0, 0));
 
-  auto sizexy = shape->size().tvalue(drawState.timeFrame, CLottie::XYVals());
+  auto sizexy = shape->size().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
   auto size   = sizexy.toPoint(CPoint2D(0, 0));
 
   //---
 
-#if 0
-  auto p1 = CPoint2D(position.x - size.x/2.0, position.y - size.y/2.0);
-  auto p2 = CPoint2D(position.x + size.x/2.0, position.y + size.y/2.0);
-
-  CBBox2D bbox(p1, p2);
-
-  //---
-
-  painter->save();
-
-  //---
-
-  auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
-
-  painter->setTransform(toQTransform(pmatrix));
-
-  setPenBrush(painter, drawState, shape);
-
-  painter->drawEllipse(toQRect(bbox));
-
-  //---
-
-  if (shape->selected()) {
-    setSelectedPenBrush(painter);
-
-    painter->drawEllipse(toQRect(bbox));
-  }
-
-  //---
-
-  painter->restore();
-#else
   auto a1 = -M_PI/2.0;
   auto a2 = a1 + 2.0*M_PI;
 
@@ -1051,26 +1415,22 @@ drawEllipse(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
 
   CBezierPath bezierPath(beziers);
 
-  drawBezierPath(painter, drawState, shape, bezierPath);
-#endif
+  drawBezierPath(drawState, shape, bezierPath);
 }
 
 void
 CQLottie::
-drawPath(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
+drawPath(DrawState &drawState, const CLottieShape *shape)
 {
   CBezierPath bezierPath;
   pathToBezier(shape->path_, drawState, bezierPath);
 
-  drawBezierPath(painter, drawState, shape, bezierPath);
-
-  const_cast<CLottieShape *>(shape)->setBBox(bezierPath.bbox());
+  drawBezierPath(drawState, shape, bezierPath);
 }
 
 void
 CQLottie::
-drawBezierPath(QPainter *painter, DrawState &drawState, const CLottieShape *shape,
-               CBezierPath &bezierPath)
+drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bezierPath)
 {
   if (drawState.trim) {
     auto offset = drawState.trim->offset;
@@ -1093,67 +1453,89 @@ drawBezierPath(QPainter *painter, DrawState &drawState, const CLottieShape *shap
 
   //---
 
-  auto ppath = toQPath(bezierPath);
+#if 1
+  auto *merge = shape->calcHierMerge();
 
-  //---
-
-  if (drawState.merge) {
-    drawState.merge->shape = shape;
-
-    drawState.merge->paths.push_back(ppath);
+  if (merge) {
+    if (drawState.merge)
+      drawState.merge->paths.push_back(bezierPath);
 
     return;
   }
-
-  //---
-
-  if (drawState.fill.rule == 2)
-    ppath.setFillRule(Qt::OddEvenFill);
-  else
-    ppath.setFillRule(Qt::WindingFill);
-
-  //---
-
-  painter->save();
-
-  //---
-
-#if 1
-  auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
 #else
-  auto pmatrix = displayRange_.getMatrix()*drawState.preMatrix;
+  if (drawState.merge) {
+    //drawState.merge->shape = shape;
 
-  for (auto *tshape : drawState.transform.shapes)
-    pmatrix = pmatrix*getShapeMatrix(drawState, tshape);
+    drawState.merge->paths.push_back(bezierPath);
+
+    return;
+  }
 #endif
 
-  painter->setTransform(toQTransform(pmatrix));
+  //---
 
-  setPenBrush(painter, drawState, shape);
+  auto path = toQPath(bezierPath);
 
-  painter->drawPath(ppath);
+  if (drawState.fill.rule == 2)
+    path.setFillRule(Qt::OddEvenFill);
+  else
+    path.setFillRule(Qt::WindingFill);
 
   //---
 
-  const_cast<CLottieShape *>(shape)->setBBox(bezierPath.bbox());
+  drawState.painter->save();
 
   //---
 
-  if (shape->selected()) {
-    setSelectedPenBrush(painter);
+  auto pmatrix = drawState.getDisplayMatrix();
+  auto smatrix = getShapeMatrix(drawState, shape);
 
-    painter->drawPath(ppath);
+  auto dmatrix = pmatrix*smatrix;
+
+  drawState.painter->setTransform(toQTransform(dmatrix));
+
+  setPenBrush(drawState, shape);
+
+  if (drawState.stroker) {
+    auto lpath = drawState.stroker->createStroke(path);
+
+    lpath.setFillRule(Qt::WindingFill);
+
+    drawState.painter->drawPath(lpath);
+  }
+  else
+    drawState.painter->drawPath(path);
+
+  //---
+
+  auto bbox = transformBBox(smatrix, bezierPath.bbox());
+
+  const_cast<CLottieShape *>(shape)->setBBox(bbox);
+
+  //---
+
+  if (shape->isHierSelected()) {
+    setSelectedPenBrush(drawState.painter);
+
+    drawState.painter->drawPath(path);
 
     if (shape->bbox().isSet()) {
-      setBBoxPenBrush(painter);
+      auto displayMatrix = pmatrix;
 
-      painter->drawRect(toQRect(shape->bbox()));
+      drawState.painter->setTransform(toQTransform(displayMatrix));
+
+      setBBoxPenBrush(drawState.painter);
+
+      drawState.painter->drawRect(toQRect(shape->bbox()));
     }
   }
 
   //---
 
-  painter->restore();
+  drawState.painter->restore();
+
+  if (drawState.layer)
+    drawState.layer->setChanged(true);
 }
 
 void
@@ -1207,20 +1589,20 @@ pathToBezier(const CLottie::BezierProperty &path, const DrawState &drawState,
 
 void
 CQLottie::
-drawPolystar(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
+drawPolystar(DrawState &drawState, const CLottieShape *shape)
 {
 //unhandledShape("polystar");
 
   auto *polyStar = shape->polyStar();
   if (! polyStar) return;
 
-  auto positionxy = polyStar->position.tvalue(drawState.timeFrame, CLottie::XYVals());
+  auto positionxy = polyStar->position.tvalue(drawState.timeFrame, CLottie::XYVals()).value();
   auto position   = positionxy.toPoint(CPoint2D(0, 0));
 
-  auto type = polyStar->type.value_or(0);
+  auto type = polyStar->type.value_or(1);
 
-  if (type != 0)
-    warnOnce(__LINE__, "type: " + std::to_string(type));
+  if (type != 1 && type != 2)
+    warnOnce(__LINE__, "unhandled polystar type: " + std::to_string(type));
 
   auto numPoints = int(polyStar->points.tvalue(drawState.timeFrame, 0).value_or(0));
 
@@ -1231,118 +1613,28 @@ drawPolystar(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
 
   auto rotation = CMathGen::DegToRad(polyStar->rotation.tvalue(drawState.timeFrame, 0).value_or(0));
 
-#if 0
-  if (innerRoundness != 0)
-    warnOnce(__LINE__, "innerRoundness: " + std::to_string(innerRoundness));
-  if (outerRoundness != 0)
-    warnOnce(__LINE__, "outerRoundness: " + std::to_string(outerRoundness));
-#endif
-
-#if 0
-  QPainterPath path;
-
-  auto da = (numPoints > 0 ? 2.0*M_PI/(2*numPoints) : 0);
-
-  for (int i = 0; i < numPoints; ++i) {
-    auto a1 = 2*i*da + M_PI/2.0 + rotation;
-    auto a2 = a1 + da;
-
-    auto c1 = std::cos(a1); auto s1 = std::sin(a1);
-    auto c2 = std::cos(a2); auto s2 = std::sin(a2);
-
-    auto xo = position.x + c1*outerRadius;
-    auto yo = position.y + s1*outerRadius;
-    auto xi = position.x + c2*innerRadius;
-    auto yi = position.y + s2*innerRadius;
-
-    if (i == 0)
-      path.moveTo(xo, yo);
-    else
-      path.lineTo(xo, yo);
-
-    path.lineTo(xi, yi);
-  }
-
-  path.closeSubpath();
-#else
   CBezierPath bezierPath;
 
-#if 0
-  auto da = (numPoints > 0 ? 2.0*M_PI/(2*numPoints) : 0);
-
-  for (int i = 0; i < numPoints; ++i) {
-    auto a1 = 2*i*da + M_PI/2.0 + rotation;
-    auto a2 = a1 + da;
-
-    auto c1 = std::cos(a1); auto s1 = std::sin(a1);
-    auto c2 = std::cos(a2); auto s2 = std::sin(a2);
-
-    auto xo = position.x + c1*outerRadius;
-    auto yo = position.y + s1*outerRadius;
-    auto xi = position.x + c2*innerRadius;
-    auto yi = position.y + s2*innerRadius;
-
-    if (i == 0)
-      bezierPath.moveTo(CPoint2D(xo, yo));
-    else
-      bezierPath.lineTo(CPoint2D(xo, yo));
-
-    bezierPath.lineTo(CPoint2D(xi, yi));
-  }
-
-  bezierPath.close();
-#else
-  bezierPath.addPolyStar(position, numPoints, innerRadius, outerRadius,
-                         innerRoundness, outerRoundness, rotation);
-#endif
-#endif
+  if (type == 1)
+    bezierPath.addPolyStar(position, numPoints, innerRadius, outerRadius,
+                           innerRoundness/100.0, outerRoundness/100.0, rotation);
+  else
+    bezierPath.addPolygon(position, numPoints, outerRadius,
+                          outerRoundness/100.0, rotation);
 
   //---
 
-#if 0
-  painter->save();
-
-  //---
-
-#if 1
-  auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
-#else
-  auto pmatrix = displayRange_.getMatrix()*drawState.preMatrix;
-
-  for (auto *tshape : drawState.transform.shapes)
-    pmatrix = pmatrix*getShapeMatrix(drawState, tshape);
-#endif
-
-  painter->setTransform(toQTransform(pmatrix));
-
-  setPenBrush(painter, drawState, shape);
-
-  painter->drawPath(path);
-
-  //---
-
-  if (shape->selected()) {
-    setSelectedPenBrush(painter);
-
-    painter->drawPath(path);
-  }
-
-  //---
-
-  painter->restore();
-#else
-  drawBezierPath(painter, drawState, shape, bezierPath);
-#endif
+  drawBezierPath(drawState, shape, bezierPath);
 }
 
 void
 CQLottie::
-drawRectangle(QPainter *painter, DrawState &drawState, const CLottieShape *shape)
+drawRectangle(DrawState &drawState, const CLottieShape *shape)
 {
-  auto positionxy = shape->pos().tvalue(drawState.timeFrame, CLottie::XYVals());
+  auto positionxy = shape->pos().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
   auto position   = positionxy.toPoint(CPoint2D(0, 0));
 
-  auto sizexy = shape->size().tvalue(drawState.timeFrame, CLottie::XYVals());
+  auto sizexy = shape->size().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
   auto size   = sizexy.toPoint(CPoint2D(0, 0));
 
   auto p1 = CPoint2D(position.x - size.x/2.0, position.y - size.y/2.0);
@@ -1362,48 +1654,15 @@ drawRectangle(QPainter *painter, DrawState &drawState, const CLottieShape *shape
   else
     bezierPath.addRect(bbox);
 
-  drawBezierPath(painter, drawState, shape, bezierPath);
-
-  //---
-
-#if 0
-  painter->save();
-
-  //---
-
-#if 1
-  auto pmatrix = displayRange_.getMatrix()*drawState.matrix;
-#else
-  auto pmatrix = displayRange_.getMatrix()*drawState.preMatrix;
-
-  for (auto *tshape : drawState.transform.shapes)
-    pmatrix = pmatrix*getShapeMatrix(drawState, tshape);
-#endif
-
-  painter->setTransform(toQTransform(pmatrix));
-
-  setPenBrush(painter, drawState, shape);
-
-  painter->drawRect(toQRect(bbox));
-
-  if (shape->selected()) {
-    setSelectedPenBrush(painter);
-
-    painter->drawRect(toQRect(bbox));
-  }
-
-  //---
-
-  painter->restore();
-#endif
+  drawBezierPath(drawState, shape, bezierPath);
 }
 
 void
 CQLottie::
-setPenBrush(QPainter *painter, const DrawState &drawState, const CLottieShape *shape)
+setPenBrush(DrawState &drawState, const CLottieShape *shape)
 {
   if (drawState.fillGradient.enabled) {
-    painter->setBrush(drawState.fillGradient.gradient);
+    drawState.painter->setBrush(drawState.fillGradient.gradient);
   }
   else {
     auto fillColor   = getFillColor  (drawState, shape, drawState.fill.color);
@@ -1415,10 +1674,10 @@ setPenBrush(QPainter *painter, const DrawState &drawState, const CLottieShape *s
       if (fillOpacity)
         c.setAlpha(int(255*(fillOpacity.value()/100.0)));
 
-      painter->setBrush(c);
+      drawState.painter->setBrush(c);
     }
     else
-      painter->setBrush(Qt::NoBrush);
+      drawState.painter->setBrush(Qt::NoBrush);
   }
 
   //---
@@ -1426,19 +1685,25 @@ setPenBrush(QPainter *painter, const DrawState &drawState, const CLottieShape *s
   QPen pen;
 
   if (drawState.strokeGradient.enabled) {
-    pen.setColor(Qt::black);
-
-    if (drawState.strokeGradient.width)
-      pen.setWidth(drawState.strokeGradient.width.value());
+    drawState.stroker = new QPainterPathStroker();
 
     if (drawState.strokeGradient.lineCap)
-      pen.setCapStyle(toLineCap(drawState.strokeGradient.lineCap.value()));
-
+      drawState.stroker->setCapStyle(toLineCap(drawState.strokeGradient.lineCap.value()));
     if (drawState.strokeGradient.lineJoin)
-      pen.setJoinStyle(toLineJoin(drawState.strokeGradient.lineJoin.value()));
+      drawState.stroker->setJoinStyle(toLineJoin(drawState.strokeGradient.lineJoin.value()));
 
     if (drawState.strokeGradient.miterLimit)
-      pen.setMiterLimit(drawState.strokeGradient.miterLimit.value());
+      drawState.stroker->setMiterLimit(drawState.strokeGradient.miterLimit.value());
+
+    drawState.stroker->setDashOffset (0.0);
+    drawState.stroker->setDashPattern(Qt::SolidLine);
+
+    if (drawState.strokeGradient.width)
+      drawState.stroker->setWidth(drawState.strokeGradient.width.value());
+
+    drawState.painter->setBrush(drawState.strokeGradient.gradient);
+
+    pen.setStyle(Qt::NoPen);
   }
   else {
     auto strokeColor   = getStrokeColor  (drawState, shape, drawState.stroke.color);
@@ -1470,23 +1735,36 @@ setPenBrush(QPainter *painter, const DrawState &drawState, const CLottieShape *s
       pen.setMiterLimit(drawState.stroke.miterLimit.value());
   }
 
-  painter->setPen(pen);
+  drawState.painter->setPen(pen);
 }
 
 void
 CQLottie::
 setSelectedPenBrush(QPainter *painter)
 {
-  painter->setBrush(QBrush(Qt::white, Qt::Dense6Pattern));
-  painter->setPen  (Qt::red);
+  auto brush = QBrush(selectedBrushColor(), Qt::Dense6Pattern);
+  brush.setTransform(painter->transform().inverted());
+
+  painter->setBrush(brush);
+  painter->setPen  (selectedPenColor());
 }
 
 void
 CQLottie::
 setBBoxPenBrush(QPainter *painter)
 {
-  painter->setBrush(Qt::NoBrush);
-  painter->setPen  (Qt::red);
+  QPen pen;
+
+  pen.setColor(bboxPenColor());
+  pen.setWidth(3);
+  pen.setCosmetic(true);
+
+  auto brush = QBrush(selectedBrushColor(), Qt::Dense5Pattern);
+  brush.setTransform(painter->transform().inverted());
+
+  painter->setBrush(brush);
+//painter->setBrush(Qt::NoBrush);
+  painter->setPen  (pen);
 }
 
 //---
@@ -1531,15 +1809,57 @@ getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const
   auto m = getTransformMatrix(drawState, shape->transform());
 #endif
 
-  auto *pshape = shape->getParentShape();
+  auto *shape1 = shape;
+
+  while (shape1->getParentShape()) {
+    auto *pshape = shape1->getParentShape();
+
+    auto *transformShape = pshape->getTransformShape();
+
+    if (transformShape)
+      m = getTransformMatrix(drawState, transformShape->transform())*m;
+    else
+      m = getTransformMatrix(drawState, pshape->transform())*m;
+
+    shape1 = pshape;
+  }
+
+#if 0
   auto *player = shape->getParentLayer();
 
-  if      (pshape)
-    m = getShapeMatrix(drawState, pshape)*m;
-  else if (player)
+  if (player)
     m = getLayerMatrix(drawState, player)*m;
+#endif
+
+  for (auto *obj : drawState.objects) {
+    auto *layer = dynamic_cast<CQLottieLayer *>(obj);
+    if (! layer) continue;
+
+    auto *repeater = layer->calcRepeater();
+
+    if (repeater) {
+      auto repeatMatrix = calcRepeatMatrix(drawState, repeater);
+      //assert(repeatMatrix == drawState.repeatMatrix);
+
+      //std::cerr << "Repeater for layer " << layer->name().value_or("") << "\n";
+      m = repeatMatrix*m;
+    }
+
+    m = getTransformMatrix(drawState, layer->transform())*m;
+  }
 
   return m;
+}
+
+CMatrix2D
+CQLottie::
+calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const
+{
+  auto repeatOffset = repeater->offset.tvalue(drawState.timeFrame, 0.0).value();
+
+  double mult = drawState.repeatInd.value_or(0) + repeatOffset;
+
+  return lottie_->getRepeaterMatrix(drawState.timeFrame, repeater->transform, mult);
 }
 
 CMatrix2D
@@ -1608,19 +1928,26 @@ getFillOpacity(const DrawState &drawState, const CLottieShape *shape, const OptR
   else if (shape->transform())
     o = shape->transform()->opacity.tvalue(drawState.timeFrame);
 
-  if (! o) {
-    auto *pshape = shape->getParentShape();
+  auto *pshape = shape->getParentShape();
 
-    if (pshape)
-      o = getFillOpacity(drawState, pshape, def);
+  if (! o && pshape)
+    return getFillOpacity(drawState, pshape, def);
 
-    if (! o) {
-      auto *player = shape->getParentLayer();
+  auto *player = shape->getHierParentLayer();
+  assert(player);
 
-      if (player)
-        o = getLayerOpacity(drawState, player, def);
-    }
+  auto *repeater = player->calcRepeater();
+
+  if (repeater) {
+    auto repeatOpacity = getRepeatOpacity(drawState, repeater);
+
+    o = combineOpacities(o, repeatOpacity);
   }
+
+  auto o1 = getLayerOpacity(drawState, player, def);
+
+  if (o1)
+    o = combineOpacities(o, o1);
 
   return (o ? o : def);
 }
@@ -1629,16 +1956,21 @@ CQLottie::OptReal
 CQLottie::
 getLayerOpacity(const DrawState &drawState, const CLottieLayer *layer, const OptReal &def) const
 {
+  auto typeId = layer->typeId().value_or(-1);
+  if (typeId == 3) return def;
+
   OptReal o;
 
   if (layer->transform())
     o = layer->transform()->opacity.tvalue(drawState.timeFrame);
 
-  if (! o) {
-    auto *player = layer->getParentLayer();
+  auto *player = layer->getParentLayer();
 
-    if (player)
-      o = getLayerOpacity(drawState, player, def);
+  if (player) {
+    auto o1 = getLayerOpacity(drawState, player, def);
+
+    if (o1)
+      o = combineOpacities(o, o1);
   }
 
   return (o ? o : def);
@@ -1670,10 +2002,46 @@ CQLottie::OptReal
 CQLottie::
 getStrokeOpacity(const DrawState &drawState, const CLottieShape *shape, const OptReal &def) const
 {
-  if (shape->stroke())
-    return shape->stroke()->opacity.tvalue(drawState.timeFrame, 100.0).value();
+  OptReal o;
 
-  return def;
+  if (shape->stroke())
+    o = shape->stroke()->opacity.tvalue(drawState.timeFrame, 100.0).value();
+
+  auto *pshape = shape->getParentShape();
+
+  if (! o && pshape)
+    return getStrokeOpacity(drawState, pshape, def);
+
+  auto *player = shape->getHierParentLayer();
+  assert(player);
+
+  auto *repeater = player->calcRepeater();
+
+  if (repeater) {
+    auto repeatOpacity = getRepeatOpacity(drawState, repeater);
+
+    o = combineOpacities(o, repeatOpacity);
+  }
+
+  auto o1 = getLayerOpacity(drawState, player, def);
+
+  if (o1)
+    o = combineOpacities(o, o1);
+
+  return (o ? o : def);
+}
+
+double
+CQLottie::
+getRepeatOpacity(const DrawState &drawState, CLottieRepeater *repeater) const
+{
+  auto repeatStartOpacity = repeater->startOpacity.tvalue(drawState.timeFrame, 100.0).value();
+  auto repeatEndOpacity   = repeater->endOpacity  .tvalue(drawState.timeFrame, 100.0).value();
+
+  auto repeatCopies = int(repeater->copies.tvalue(drawState.timeFrame, 1.0).value());
+
+  return CMathUtil::map(drawState.repeatInd.value_or(0),
+                        0, repeatCopies - 1, repeatStartOpacity, repeatEndOpacity);
 }
 
 //---
@@ -1703,6 +2071,13 @@ scroll(double dx, double dy)
   displayRange_.scroll(dw*dx, dh*dy);
 }
 
+void
+CQLottie::
+zoomFull()
+{
+  displayRange_.reset();
+}
+
 //---
 
 CQLottieCanvas::
@@ -1716,9 +2091,20 @@ CQLottieCanvas(CQLottie *lottie) :
 
 void
 CQLottieCanvas::
+invalidate()
+{
+  needsUpdate_ = true;
+
+  update();
+}
+
+void
+CQLottieCanvas::
 resizeEvent(QResizeEvent *)
 {
   lottie_->setPixelSize(width(), height());
+
+  needsUpdate_ = true;
 }
 
 void
@@ -1729,9 +2115,11 @@ paintEvent(QPaintEvent *)
 
   painter.setRenderHint(QPainter::Antialiasing);
 
-  painter.fillRect(rect(), QColor(255, 255, 255));
+  painter.fillRect(rect(), lottie_->bgColor());
 
-  lottie_->draw(&painter);
+  lottie_->draw(&painter, needsUpdate_);
+
+  needsUpdate_ = false;
 }
 
 void
@@ -1767,1527 +2155,250 @@ keyPressEvent(QKeyEvent *ke)
   else if (key == Qt::Key_Down) {
     lottie_->scroll(0, -1);
   }
+  else if (key == Qt::Key_Home) {
+    lottie_->zoomFull();
+  }
 
-  update();
+  invalidate();
 }
 
 //---
 
-CQLottieTree::
-CQLottieTree(CQLottie *lottie) :
+CQLottieLayer::
+CQLottieLayer(CQLottie *lottie) :
+ CLottieLayer(lottie->lottie()), lottie_(lottie)
+{
+}
+
+CQLottieLayer::
+~CQLottieLayer()
+{
+  delete painter_;
+}
+
+void
+CQLottieLayer::
+resize(int w, int h)
+{
+  if (w != w_ || h != h_) {
+    w_ = w;
+    h_ = h;
+
+    delete painter_;
+
+    painter_ = nullptr;
+
+    image_ = QImage(w_, h_, QImage::Format_ARGB32);
+  }
+
+  clear();
+}
+
+QPainter *
+CQLottieLayer::
+painter()
+{
+  if (! painter_)
+    painter_ = new QPainter(&image_);
+
+  return painter_;
+}
+
+void
+CQLottieLayer::
+clear()
+{
+  image_.fill(0);
+}
+
+//---
+
+CQLottieToolBar::
+CQLottieToolBar(CQLottie *lottie) :
  lottie_(lottie)
 {
+  auto addToolButton = [&](const QString &name, const QString &iconName,
+                           const QString &tip, const char *slotName) {
+    auto *button = new CQIconButton;
+
+    button->setObjectName(name);
+    button->setIcon(iconName);
+    button->setIconSize(QSize(32, 32));
+    button->setAutoRaise(true);
+    button->setToolTip(tip);
+
+    connect(button, SIGNAL(clicked()), this, slotName);
+
+    return button;
+  };
+
+  //---
+
+  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+  auto *tlayout = new QHBoxLayout(this);
+
+  auto *playButton  = addToolButton("play" , "PLAY"    , "Play" , SLOT(playSlot()));
+  auto *pauseButton = addToolButton("pause", "PAUSE"   , "Pause", SLOT(pauseSlot()));
+  auto *stepButton  = addToolButton("step" , "PLAY_ONE", "Step" , SLOT(stepSlot()));
+
+  tlayout->addWidget(playButton);
+  tlayout->addWidget(pauseButton);
+  tlayout->addWidget(stepButton);
+
+  auto *loadButton = new QPushButton("Load");
+
+  connect(loadButton, SIGNAL(clicked()), this, SLOT(loadSlot()));
+
+  tlayout->addStretch(1);
+  tlayout->addWidget(loadButton);
+}
+
+void
+CQLottieToolBar::
+playSlot()
+{
+  lottie_->playSlot();
+}
+
+void
+CQLottieToolBar::
+pauseSlot()
+{
+  lottie_->pauseSlot();
+}
+
+void
+CQLottieToolBar::
+stepSlot()
+{
+  lottie_->stepSlot();
+}
+
+void
+CQLottieToolBar::
+loadSlot()
+{
+  lottie_->loadSlot();
+}
+
+//---
+
+CQLottieSettings::
+CQLottieSettings(CQLottie *lottie) :
+ lottie_(lottie)
+{
+  std::vector<QLabel *> labels;
+
+  setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+
   auto *layout = new QVBoxLayout(this);
+  layout->setMargin(0); layout->setSpacing(0);
 
-  tree_ = new CQLottieTreeWidget(this);
+  auto addLabelEdit = [&](const QString &label, auto *w) {
+    auto *frame   = new QFrame;
+    auto *layout1 = new QHBoxLayout(frame);
 
-  layout->addWidget(tree_);
+    auto *labelW = new QLabel(label);
 
-  //---
+    labels.push_back(labelW);
 
-  tree_->setColumnCount(2);
+    layout1->addWidget(labelW);
+    layout1->addWidget(w);
 
-  tree_->setHeaderLabels(QStringList() << "Name" << "Value");
+    layout->addWidget(frame);
 
-  //--
+    return w;
+  };
 
-  tree_->setUniformRowHeights(true);
+  bgFillEdit_       = addLabelEdit("Bg Fill"      , new CQColorEdit(this));
+  selectFillEdit_   = addLabelEdit("Select Fill"  , new CQColorEdit(this));
+  selectStrokeEdit_ = addLabelEdit("Select Stroke", new CQColorEdit(this));
+  bboxStrokeEdit_   = addLabelEdit("BBox Stroke"  , new CQColorEdit(this));
 
-  tree_->setAlternatingRowColors(true);
+  auto alignLabels = [&]() {
+    QFontMetrics fm(font());
 
-  tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    int lw = 0;
 
-  //---
+    for (auto *label : labels)
+      lw = std::max(lw, label->sizeHint().width());
 
-  tree_->setItemDelegate(new CQLottieTreeDelegate(this));
+    for (auto *label : labels)
+      label->setFixedWidth(lw);
+  };
 
-  //---
+  layout->addStretch(1);
 
-  tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-
-  connect(tree_, SIGNAL(customContextMenuRequested(const QPoint&)),
-          this, SLOT(customContextMenuSlot(const QPoint&)));
-
-  //---
-
-  auto *controlFrame  = new QFrame;
-  auto *controlLayout = new QHBoxLayout(controlFrame);
-
-  layout->addWidget(controlFrame);
-
-  auto *transformButton     = new QPushButton("Transform");
-  auto *hierTransformButton = new QPushButton("Hier Transform");
-  auto *printButton         = new QPushButton("Print");
-
-  connect(transformButton, SIGNAL(clicked()), this, SLOT(transformSlot()));
-  connect(hierTransformButton, SIGNAL(clicked()), this, SLOT(hierTransformSlot()));
-  connect(printButton, SIGNAL(clicked()), this, SLOT(printSlot()));
-
-  controlLayout->addStretch(1);
-  controlLayout->addWidget(transformButton);
-  controlLayout->addWidget(hierTransformButton);
-  controlLayout->addWidget(printButton);
+  alignLabels();
 
   //---
 
   connectSlots(true);
+
+  updateWidgets();
 }
 
 void
-CQLottieTree::
-resizeEvent(QResizeEvent *)
+CQLottieSettings::
+connectSlots(bool b)
 {
-  expandAll();
+  CQUtil::connectDisconnect(b, bgFillEdit_, SIGNAL(colorChanged(const QColor &)),
+                            this, SLOT(bgFillSlot(const QColor &)));
+  CQUtil::connectDisconnect(b, selectFillEdit_, SIGNAL(colorChanged(const QColor &)),
+                            this, SLOT(selectedFillSlot(const QColor &)));
+  CQUtil::connectDisconnect(b, selectStrokeEdit_, SIGNAL(colorChanged(const QColor &)),
+                            this, SLOT(selectedStrokeSlot(const QColor &)));
+  CQUtil::connectDisconnect(b, bboxStrokeEdit_, SIGNAL(colorChanged(const QColor &)),
+                            this, SLOT(bboxStrokeSlot(const QColor &)));
 }
 
 void
-CQLottieTree::
-load()
+CQLottieSettings::
+updateWidgets()
 {
   connectSlots(false);
 
-  //---
-
-  tree_->clear();
-
-  layerItem_ .clear();
-  assetItem_ .clear();
-  shapeItem_ .clear();
-  effectItem_.clear();
-
-  //---
-
-  auto *root = lottie_->lottie()->root();
-
-  rootItem_ = new CQLottieTreeRootItem(tree_, root);
-
-  tree_->addTopLevelItem(rootItem_);
-
-  for (auto *asset : root->assets()) {
-    auto *item = createAssetItem(asset);
-
-    item->setData(0, Qt::UserRole, asset->ind().value_or(-1));
-  }
-
-  for (auto *layer : root->layers()) {
-    auto *item = createLayerItem(layer);
-
-    item->setData(0, Qt::UserRole, layer->ind().value_or(-1));
-  }
-
-  //---
-
-  expandAll();
-
-  //---
+  bgFillEdit_      ->setColor(lottie_->bgColor());
+  selectFillEdit_  ->setColor(lottie_->selectedBrushColor());
+  selectStrokeEdit_->setColor(lottie_->selectedPenColor());
+  bboxStrokeEdit_  ->setColor(lottie_->bboxPenColor());
 
   connectSlots(true);
 }
 
-QTreeWidgetItem *
-CQLottieTree::
-createLayerItem(CLottieLayer *layer)
+void
+CQLottieSettings::
+bgFillSlot(const QColor &c)
 {
-  auto pl = layerItem_.find(layer);
+  lottie_->setBgColor(c);
 
-  if (pl != layerItem_.end())
-    return (*pl).second;
-
-  auto name = QString::fromStdString(layer->name().value_or(""));
-
-  auto *parentAsset = layer->getParentAsset();
-  auto *parentLayer = layer->getParentLayer();
-
-  QTreeWidgetItem *parentItem { nullptr };
-
-  if      (parentAsset)
-    parentItem = createAssetItem(parentAsset);
-  else if (parentLayer)
-    parentItem = createLayerItem(parentLayer);
-  else
-    parentItem = rootItem_;
-
-  auto *item = new CQLottieTreeLayerItem(parentItem, layer);
-
-  parentItem->addChild(item);
-
-  layerItem_[layer] = item;
-
-  //---
-
-  auto *effect = layer->effect();
-
-  if (effect) {
-    auto *item = createEffectItem(effect);
-
-    item->setData(0, Qt::UserRole, effect->ind().value_or(-1));
-  }
-
-  //---
-
-  for (auto *shape : layer->shapes()) {
-    auto *item = createShapeItem(shape);
-
-    item->setData(0, Qt::UserRole, shape->ind().value_or(-1));
-  }
-
-  //---
-
-  return item;
-}
-
-QTreeWidgetItem *
-CQLottieTree::
-createAssetItem(CLottieAsset *asset)
-{
-  auto pa = assetItem_.find(asset);
-
-  if (pa != assetItem_.end())
-    return (*pa).second;
-
-  auto name = QString::fromStdString(asset->name().value_or(""));
-
-  auto *item = new CQLottieTreeAssetItem(rootItem_, asset);
-
-  rootItem_->addChild(item);
-
-  assetItem_[asset] = item;
-
-  //---
-
-  for (auto *layer : asset->layers()) {
-    auto *item = createLayerItem(layer);
-
-    item->setData(0, Qt::UserRole, layer->ind().value_or(-1));
-  }
-
-  //---
-
-  return item;
-}
-
-QTreeWidgetItem *
-CQLottieTree::
-createShapeItem(CLottieShape *shape)
-{
-  auto pl = shapeItem_.find(shape);
-
-  if (pl != shapeItem_.end())
-    return (*pl).second;
-
-  auto name = QString::fromStdString(shape->name().value_or(""));
-
-  auto *parentLayer = shape->getParentLayer();
-  auto *parentShape = shape->getParentShape();
-
-  QTreeWidgetItem *item = nullptr;
-
-  if     (parentLayer) {
-    auto *parentItem = createLayerItem(parentLayer);
-
-    item = new CQLottieTreeShapeItem(parentItem, shape);
-
-    parentItem->addChild(item);
-  }
-  else if (parentShape) {
-    auto *parentItem = createShapeItem(parentShape);
-
-    item = new CQLottieTreeShapeItem(parentItem, shape);
-
-    parentItem->addChild(item);
-  }
-
-  assert(item);
-
-  shapeItem_[shape] = item;
-
-  //---
-
-  for (auto *shape1 : shape->shapes()) {
-    auto *item = createShapeItem(shape1);
-
-    item->setData(0, Qt::UserRole, shape1->ind().value_or(-1));
-  }
-
-  //---
-
-  return item;
-}
-
-QTreeWidgetItem *
-CQLottieTree::
-createEffectItem(CLottieEffect *effect)
-{
-  auto pe = effectItem_.find(effect);
-
-  if (pe != effectItem_.end())
-    return (*pe).second;
-
-  auto name = QString::fromStdString(effect->name().value_or(""));
-
-  auto *parentLayer = effect->getLayer();
-
-  QTreeWidgetItem *item = nullptr;
-
-  if (parentLayer) {
-    auto *parentItem = createLayerItem(parentLayer);
-
-    item = new CQLottieTreeEffectItem(parentItem, effect);
-
-    parentItem->addChild(item);
-  }
-
-  assert(item);
-
-  effectItem_[effect] = item;
-
-  //---
-
-  return item;
+  lottie_->updateAll();
 }
 
 void
-CQLottieTree::
-connectSlots(bool b)
+CQLottieSettings::
+selectedFillSlot(const QColor &c)
 {
-  if (b) {
-    connect(tree_, SIGNAL(itemClicked(QTreeWidgetItem *, int)),
-            this, SLOT(itemClickedSlot(QTreeWidgetItem *, int)));
-    connect(tree_, SIGNAL(currentItemChanged(QTreeWidgetItem *, QTreeWidgetItem *)),
-            this, SLOT(itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *)));
-  }
-  else {
-    disconnect(tree_, SIGNAL(itemClicked(QTreeWidgetItem *, int)),
-               this, SLOT(itemClickedSlot(QTreeWidgetItem *, int)));
-    disconnect(tree_, SIGNAL(currentItemChanged(QTreeWidgetItem *, QTreeWidgetItem *)),
-               this, SLOT(itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *)));
-  }
+  lottie_->setSelectedBrushColor(c);
+
+  lottie_->updateAll();
 }
 
 void
-CQLottieTree::
-itemClickedSlot(QTreeWidgetItem * /*item*/, int /*column*/)
+CQLottieSettings::
+selectedStrokeSlot(const QColor &c)
 {
+  lottie_->setSelectedPenColor(c);
+
+  lottie_->updateAll();
 }
 
 void
-CQLottieTree::
-itemSelectedSlot(QTreeWidgetItem *item, QTreeWidgetItem *)
+CQLottieSettings::
+bboxStrokeSlot(const QColor &c)
 {
-  lottie_->lottie()->deselectAll();
+  lottie_->setBBoxPenColor(c);
 
-  auto *objItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-  if (! objItem) return;
-
-  objItem->object()->setSelected(true);
-
-  lottie_->objectTree()->setObject(objItem->object());
-
-  lottie_->canvas()->update();
-}
-
-void
-CQLottieTree::
-customContextMenuSlot(const QPoint &pos)
-{
-  auto *menu = new QMenu;
-
-  auto *expandAction   = new QAction("Expand All"  , menu);
-  auto *collapseAction = new QAction("Collapse All", menu);
-
-  connect(expandAction  , SIGNAL(triggered()), this, SLOT(expandAll()));
-  connect(collapseAction, SIGNAL(triggered()), this, SLOT(collapseAll()));
-
-  menu->addAction(expandAction);
-  menu->addAction(collapseAction);
-
-  auto mpos = tree_->viewport()->mapToGlobal(pos);
-
-  menu->exec(mpos);
-
-  delete menu;
-}
-
-void
-CQLottieTree::
-expandAll(const QModelIndex &ind)
-{
-  tree_->setExpanded(ind, true);
-
-  for (int r = 0; r < tree_->model()->rowCount(ind); ++r) {
-    auto ind1 = tree_->model()->index(r, 0, ind);
-
-    expandAll(ind1);
-  }
-
-  if (! ind.parent().isValid()) {
-    tree_->resizeColumnToContents(0);
-    tree_->resizeColumnToContents(1);
-  }
-}
-
-void
-CQLottieTree::
-collapseAll(const QModelIndex &ind)
-{
-  tree_->setExpanded(ind, false);
-
-  for (int r = 0; r < tree_->model()->rowCount(ind); ++r) {
-    auto ind1 = tree_->model()->index(r, 0, ind);
-
-    collapseAll(ind1);
-  }
-}
-
-void
-CQLottieTree::
-printSlot()
-{
-  auto selectedItems = tree_->selectedItems();
-
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
-
-    auto *obj = objectItem->object();
-
-    obj->print();
-  }
-}
-
-void
-CQLottieTree::
-transformSlot()
-{
-  CLottieUtil::TimeFrame timeFrame;
-  lottie_->getTimeFrame(timeFrame);
-
-  auto selectedItems = tree_->selectedItems();
-
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
-
-    auto *obj = objectItem->object();
-
-    auto m = obj->calcTransform(timeFrame);
-
-    std::cerr << m << "\n";
-  }
-}
-
-void
-CQLottieTree::
-hierTransformSlot()
-{
-  CLottieUtil::TimeFrame timeFrame;
-  lottie_->getTimeFrame(timeFrame);
-
-  auto selectedItems = tree_->selectedItems();
-
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
-
-    auto *obj = objectItem->object();
-
-    auto m = obj->calcHierTransform(timeFrame);
-
-    std::cerr << m << "\n";
-  }
-}
-
-QTreeWidgetItem *
-CQLottieTree::
-itemFromIndex(const QModelIndex &index) const
-{
-  QTreeWidgetItem *item;
-
-  if (! index.parent().isValid())
-    item = tree_->topLevelItem(index.row());
-  else {
-    auto *parent = itemFromIndex(index.parent());
-    assert(parent);
-
-    item = parent->child(index.row());
-  }
-
-  return item;
-}
-
-//---
-
-CQLottieTreeWidget::
-CQLottieTreeWidget(CQLottieTree *tree) :
- tree_(tree)
-{
-  setSelectionMode(QTreeWidget::SingleSelection);
-}
-
-//---
-
-CQLottieTreeDelegate::
-CQLottieTreeDelegate(CQLottieTree *tree) :
- QItemDelegate(tree), tree_(tree)
-{
-}
-
-QWidget *
-CQLottieTreeDelegate::
-createEditor(QWidget * /*parent*/, const QStyleOptionViewItem &,
-             const QModelIndex & /*index*/) const
-{
-  return nullptr;
-}
-
-//! get data to display in tree widget item
-void
-CQLottieTreeDelegate::
-setEditorData(QWidget * /*w*/, const QModelIndex & /*index*/) const
-{
-}
-
-//! store displayed tree widget item data in model
-void
-CQLottieTreeDelegate::
-setModelData(QWidget * /*w*/, QAbstractItemModel *, const QModelIndex & /*index*/) const
-{
-}
-
-void
-CQLottieTreeDelegate::
-updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
-                     const QModelIndex &index) const
-{
-  return QItemDelegate::updateEditorGeometry(editor, option, index);
-}
-
-QSize
-CQLottieTreeDelegate::
-sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
-{
-  return QItemDelegate::sizeHint(option, index);
-}
-
-void
-CQLottieTreeDelegate::
-paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
-{
-  return QItemDelegate::paint(painter, option, index);
-}
-
-//---
-
-namespace {
-
-QString objectLabelStr(CLottieObject *object) {
-  auto objTypeName = QString::fromStdString(CLottieObject::typeName(object->objectType()));
-  auto objName     = QString::fromStdString(object->name().value_or(""));
-  auto typeName    = QString::fromStdString(object->type());
-
-  QString indStr;
-
-  if (object->ind())
-    indStr = QString(" (#%1)").arg(*object->ind());
-
-  return objTypeName + ": " + objName + " (" + typeName + ")" + indStr;
-}
-
-}
-
-CQLottieTreeObjectItem::
-CQLottieTreeObjectItem(QTreeWidget *parent, CLottieObject *object) :
- QTreeWidgetItem(parent, QStringList() << objectLabelStr(object)), object_(object)
-{
-}
-
-CQLottieTreeObjectItem::
-CQLottieTreeObjectItem(QTreeWidgetItem *parent, CLottieObject *object) :
- QTreeWidgetItem(parent, QStringList() << objectLabelStr(object)), object_(object)
-{
-}
-
-//---
-
-CQLottieTreeRootItem::
-CQLottieTreeRootItem(QTreeWidget *parent, CLottieRoot *root) :
- CQLottieTreeObjectItem(parent, root), root_(root)
-{
-}
-
-CQLottieTreeAssetItem::
-CQLottieTreeAssetItem(QTreeWidgetItem *parent, CLottieAsset *asset) :
- CQLottieTreeObjectItem(parent, asset), asset_(asset)
-{
-}
-
-CQLottieTreeLayerItem::
-CQLottieTreeLayerItem(QTreeWidgetItem *parent, CLottieLayer *layer) :
- CQLottieTreeObjectItem(parent, layer), layer_(layer)
-{
-}
-
-CQLottieTreeShapeItem::
-CQLottieTreeShapeItem(QTreeWidgetItem *parent, CLottieShape *shape) :
- CQLottieTreeObjectItem(parent, shape), shape_(shape)
-{
-}
-
-CQLottieTreeEffectItem::
-CQLottieTreeEffectItem(QTreeWidgetItem *parent, CLottieEffect *effect) :
- CQLottieTreeObjectItem(parent, effect), effect_(effect)
-{
-}
-
-//---
-
-CQLottieObjectTree::
-CQLottieObjectTree(CQLottie *lottie) :
- lottie_(lottie)
-{
-  auto *layout = new QVBoxLayout(this);
-
-  tree_ = new CQLottieObjectTreeWidget(this);
-
-  layout->addWidget(tree_);
-
-  //---
-
-  tree_->setColumnCount(2);
-
-  tree_->setHeaderLabels(QStringList() << "Name" << "Value");
-
-  //--
-
-  tree_->setUniformRowHeights(true);
-
-  tree_->setAlternatingRowColors(true);
-
-  tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-
-  //---
-
-  tree_->setItemDelegate(new CQLottieObjectTreeDelegate(this));
-
-  //---
-
-  tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-
-  connect(tree_, SIGNAL(customContextMenuRequested(const QPoint&)),
-          this, SLOT(customContextMenuSlot(const QPoint&)));
-
-  //---
-
-  auto *controlFrame  = new QFrame;
-  auto *controlLayout = new QHBoxLayout(controlFrame);
-
-  layout->addWidget(controlFrame);
-
-  auto *printButton = new QPushButton("Print");
-
-  connect(printButton, SIGNAL(clicked()), this, SLOT(printSlot()));
-
-  controlLayout->addStretch(1);
-  controlLayout->addWidget(printButton);
-
-  //---
-
-  connectSlots(true);
-}
-
-void
-CQLottieObjectTree::
-connectSlots(bool b)
-{
-  if (b) {
-    connect(tree_, SIGNAL(itemClicked(QTreeWidgetItem *, int)),
-            this, SLOT(itemClickedSlot(QTreeWidgetItem *, int)));
-    connect(tree_, SIGNAL(currentItemChanged(QTreeWidgetItem *, QTreeWidgetItem *)),
-            this, SLOT(itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *)));
-  }
-  else {
-    disconnect(tree_, SIGNAL(itemClicked(QTreeWidgetItem *, int)),
-               this, SLOT(itemClickedSlot(QTreeWidgetItem *, int)));
-    disconnect(tree_, SIGNAL(currentItemChanged(QTreeWidgetItem *, QTreeWidgetItem *)),
-               this, SLOT(itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *)));
-  }
-}
-
-void
-CQLottieObjectTree::
-setObject(CLottieObject *object)
-{
-  object_ = object;
-
-  load();
-
-  expandAll();
-}
-
-void
-CQLottieObjectTree::
-load()
-{
-  connectSlots(false);
-
-  //---
-
-  tree_->clear();
-
-  //---
-
-  // title
-  auto title = objectLabelStr(object_);
-
-  auto *item = new QTreeWidgetItem(QStringList() << title);
-
-  tree_->addTopLevelItem(item);
-
-  //---
-
-  auto *root   = dynamic_cast<CLottieRoot   *>(object_);
-  auto *asset  = dynamic_cast<CLottieAsset  *>(object_);
-  auto *layer  = dynamic_cast<CLottieLayer  *>(object_);
-  auto *shape  = dynamic_cast<CLottieShape  *>(object_);
-  auto *effect = dynamic_cast<CLottieEffect *>(object_);
-
-  struct PropName {
-    QString                     name;
-    CQLottieTreeValueItem::Type type { CQLottieTreeValueItem::Type::NONE };
-
-    PropName() { }
-
-    PropName(const QString &n, const CQLottieTreeValueItem::Type &t) :
-     name(n), type(t) {
-    }
-  };
-
-  std::vector<PropName> objPropNames = {
-    { "name"  , CQLottieTreeValueItem::Type::STRING },
-    { "type"  , CQLottieTreeValueItem::Type::STRING },
-//  { "typeId", CQLottieTreeValueItem::Type::INTEGER },
-    { "hidden", CQLottieTreeValueItem::Type::BOOL },
-    { "ind"   , CQLottieTreeValueItem::Type::INTEGER }
-  };
-
-  if      (root) {
-    std::vector<PropName> propNames = {
-      { "frameRate" , CQLottieTreeValueItem::Type::REAL },
-      { "frameStart", CQLottieTreeValueItem::Type::REAL },
-      { "frameStop" , CQLottieTreeValueItem::Type::REAL },
-      { "width"     , CQLottieTreeValueItem::Type::REAL },
-      { "height"    , CQLottieTreeValueItem::Type::REAL },
-    };
-
-    auto addRootProp = [&](const PropName &propName) {
-      auto *propItem = new CQLottieTreeRootValueItem(item, root, propName.name, propName.type);
-      item->addChild(propItem);
-    };
-
-    for (const auto &propName : objPropNames) {
-      if (propName.name == "ind" && ! object_->ind())
-        continue;
-
-      addRootProp(propName);
-    }
-
-    for (const auto &propName : propNames)
-      addRootProp(propName);
-  }
-  else if (asset) {
-    std::vector<PropName> propNames = {
-      { "id", CQLottieTreeValueItem::Type::STRING },
-    };
-
-    auto addAssetProp = [&](const PropName &propName) {
-      auto *propItem = new CQLottieTreeAssetValueItem(item, asset, propName.name, propName.type);
-      item->addChild(propItem);
-    };
-
-    for (const auto &propName : objPropNames) {
-      if (propName.name == "ind" && ! object_->ind())
-        continue;
-
-      addAssetProp(propName);
-    }
-
-    for (const auto &propName : propNames)
-      addAssetProp(propName);
-  }
-  else if (layer) {
-    std::vector<PropName> propNames = {
-      { "typeId"   , CQLottieTreeValueItem::Type::STRING  },
-      { "refId"    , CQLottieTreeValueItem::Type::STRING  },
-      { "parentInd", CQLottieTreeValueItem::Type::INTEGER },
-      { "opacity"  , CQLottieTreeValueItem::Type::REAL    },
-      { "frameIn"  , CQLottieTreeValueItem::Type::INTEGER },
-      { "frameOut" , CQLottieTreeValueItem::Type::INTEGER }
-    };
-
-    auto addLayerProp = [&](const PropName &propName) {
-      auto *propItem = new CQLottieTreeLayerValueItem(item, layer, propName.name, propName.type);
-      item->addChild(propItem);
-    };
-
-    for (const auto &propName : objPropNames) {
-      if (propName.name == "ind" && ! object_->ind())
-        continue;
-
-      addLayerProp(propName);
-    }
-
-    for (const auto &propName : propNames) {
-      if (propName.name == "parentInd" && ! layer->parentInd())
-        continue;
-
-      addLayerProp(propName);
-    }
-  }
-  else if (shape) {
-    std::vector<PropName> propNames = { };
-
-    auto addShapeProp = [&](const PropName &propName) {
-      auto *propItem = new CQLottieTreeShapeValueItem(item, shape, propName.name, propName.type);
-      item->addChild(propItem);
-    };
-
-    for (const auto &propName : objPropNames) {
-      if (propName.name == "ind" && ! object_->ind())
-        continue;
-
-      addShapeProp(propName);
-    }
-
-    if ((shape->fill  () && shape->fill  ()->color.isSet()) ||
-        (shape->stroke() && shape->stroke()->color.isSet()) ||
-        shape->color().isSet())
-      addShapeProp(PropName("color", CQLottieTreeValueItem::Type::COLOR));
-
-    if ((shape->fill     () && shape->fill     ()->opacity.isSet()) ||
-        (shape->stroke   () && shape->stroke   ()->opacity.isSet()) ||
-        (shape->transform() && shape->transform()->opacity.isSet()))
-      addShapeProp(PropName("opacity", CQLottieTreeValueItem::Type::REAL));
-
-    for (const auto &propName : propNames)
-      addShapeProp(propName);
-
-    if (shape->pos().isSet())
-      addShapeProp(PropName("position", CQLottieTreeValueItem::Type::POSITION));
-
-    if (shape->size().isSet())
-      addShapeProp(PropName("size", CQLottieTreeValueItem::Type::SIZE));
-
-    if (shape->trim()) {
-      std::vector<PropName> trimPropNames = {
-        { "trim.start"   , CQLottieTreeValueItem::Type::SCALAR },
-        { "trim.end"     , CQLottieTreeValueItem::Type::SCALAR },
-        { "trim.offset"  , CQLottieTreeValueItem::Type::SCALAR },
-        { "trim.multiple", CQLottieTreeValueItem::Type::INTEGER }
-      };
-
-      for (const auto &propName : trimPropNames)
-        addShapeProp(propName);
-    }
-  }
-  else if (effect) {
-    std::vector<PropName> propNames = {
-      { "etype", CQLottieTreeValueItem::Type::INTEGER }
-    };
-
-    auto addEffectProp = [&](const PropName &propName) {
-      auto *propItem = new CQLottieTreeEffectValueItem(item, effect, propName.name, propName.type);
-      item->addChild(propItem);
-    };
-
-    for (const auto &propName : objPropNames) {
-      if (propName.name == "ind" && ! object_->ind())
-        continue;
-
-      addEffectProp(propName);
-    }
-
-    for (const auto &propName : propNames)
-      addEffectProp(propName);
-  }
-
-  //---
-
-  connectSlots(true);
-}
-
-void
-CQLottieObjectTree::
-itemClickedSlot(QTreeWidgetItem *item, int column)
-{
-  if (column != 1)
-    return;
-
-  auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-  if (! valueItem) return;
-
-  if (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-    if (valueItem->propName() == "hidden") {
-      valueItem->object()->setHidden(! valueItem->object()->hidden().value_or(false));
-
-      auto ind = tree_->indexFromItem(item, column);
-
-      tree_->update(ind);
-
-      lottie_->canvas()->update();
-    }
-  }
-}
-
-void
-CQLottieObjectTree::
-itemSelectedSlot(QTreeWidgetItem *item, QTreeWidgetItem *)
-{
-  lottie_->lottie()->deselectAll();
-
-  auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-  if (! valueItem) return;
-
-  valueItem->object()->setSelected(true);
-
-  lottie_->canvas()->update();
-}
-
-void
-CQLottieObjectTree::
-customContextMenuSlot(const QPoint &pos)
-{
-  auto *menu = new QMenu;
-
-  auto *expandAction   = new QAction("Expand All"  , menu);
-  auto *collapseAction = new QAction("Collapse All", menu);
-
-  connect(expandAction  , SIGNAL(triggered()), this, SLOT(expandAll()));
-  connect(collapseAction, SIGNAL(triggered()), this, SLOT(collapseAll()));
-
-  menu->addAction(expandAction);
-  menu->addAction(collapseAction);
-
-  auto mpos = tree_->viewport()->mapToGlobal(pos);
-
-  menu->exec(mpos);
-
-  delete menu;
-}
-
-void
-CQLottieObjectTree::
-expandAll(const QModelIndex &ind)
-{
-  tree_->setExpanded(ind, true);
-
-  for (int r = 0; r < tree_->model()->rowCount(ind); ++r) {
-    auto ind1 = tree_->model()->index(r, 0, ind);
-
-    expandAll(ind1);
-  }
-
-  if (! ind.parent().isValid()) {
-    tree_->resizeColumnToContents(0);
-    tree_->resizeColumnToContents(1);
-  }
-}
-
-void
-CQLottieObjectTree::
-collapseAll(const QModelIndex &ind)
-{
-  tree_->setExpanded(ind, false);
-
-  for (int r = 0; r < tree_->model()->rowCount(ind); ++r) {
-    auto ind1 = tree_->model()->index(r, 0, ind);
-
-    collapseAll(ind1);
-  }
-}
-
-void
-CQLottieObjectTree::
-printSlot()
-{
-  if (object_)
-    object_->print();
-}
-
-QTreeWidgetItem *
-CQLottieObjectTree::
-itemFromIndex(const QModelIndex &index) const
-{
-  QTreeWidgetItem *item;
-
-  if (! index.parent().isValid())
-    item = tree_->topLevelItem(index.row());
-  else {
-    auto *parent = itemFromIndex(index.parent());
-    assert(parent);
-
-    item = parent->child(index.row());
-  }
-
-  return item;
-}
-
-//---
-
-CQLottieObjectTreeWidget::
-CQLottieObjectTreeWidget(CQLottieObjectTree *tree) :
- tree_(tree)
-{
-  setSelectionMode(QTreeWidget::SingleSelection);
-}
-
-//---
-
-CQLottieObjectTreeDelegate::
-CQLottieObjectTreeDelegate(CQLottieObjectTree *tree) :
- QItemDelegate(tree), tree_(tree)
-{
-}
-
-QWidget *
-CQLottieObjectTreeDelegate::
-createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &index) const
-{
-  if (index.column() != 1)
-    return nullptr;
-
-  auto index1 = index.model()->index(index.row(), 0, index.parent());
-
-  auto *item = tree_->itemFromIndex(index1);
-
-  auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-  if (! valueItem) return nullptr;
-
-  QWidget *w { nullptr };
-
-  if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-    auto *check = new QCheckBox(parent);
-
-    check->setAutoFillBackground(true);
-
-    connect(check, SIGNAL(stateChanged(int)), this, SLOT(updateValue()));
-
-    w = check;
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-    auto *edit = new CQRealSpin(parent);
-
-    edit->setAutoFillBackground(true);
-
-    connect(edit, SIGNAL(editingFinished()), this, SLOT(updateValue()));
-
-    w = edit;
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
-    auto *edit = new QLineEdit(parent);
-
-    edit->setAutoFillBackground(true);
-
-    connect(edit, SIGNAL(editingFinished()), this, SLOT(updateValue()));
-
-    w = edit;
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
-    auto *chooser = new CQColorChooser(parent);
-
-    chooser->setAutoFillBackground(true);
-
-    chooser->setStyles(CQColorChooser::Text | CQColorChooser::ColorButton);
-
-    connect(chooser, SIGNAL(colorChanged(const QColor&)), this, SLOT(updateValue()));
-
-    w = chooser;
-  }
-
-  if (! w)
-    return nullptr;
-
-  editIndex_ = index;
-
-  return w;
-}
-
-void
-CQLottieObjectTreeDelegate::
-updateValue()
-{
-  auto *o = sender();
-
-  setModelData(qobject_cast<QWidget *>(o), nullptr, editIndex_);
-}
-
-//! get data to display in tree widget item
-void
-CQLottieObjectTreeDelegate::
-setEditorData(QWidget *w, const QModelIndex &index) const
-{
-  auto *item = tree_->itemFromIndex(index);
-
-  auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-  if (! valueItem) return;
-
-//auto *rootItem  = dynamic_cast<CQLottieTreeRootValueItem  *>(valueItem);
-//auto *assetItem = dynamic_cast<CQLottieTreeAssetValueItem *>(valueItem);
-  auto *layerItem = dynamic_cast<CQLottieTreeLayerValueItem *>(valueItem);
-  auto *shapeItem = dynamic_cast<CQLottieTreeShapeValueItem *>(valueItem);
-
-  if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-    auto *check = qobject_cast<QCheckBox *>(w);
-
-    if (valueItem->propName() == "hidden")
-      check->setChecked(valueItem->object()->hidden().value_or(false));
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
-    auto *edit = qobject_cast<QLineEdit *>(w);
-
-    if (valueItem->propName() == "refId") {
-      if (layerItem)
-        edit->setText(QString::fromStdString(layerItem->layer()->refId().value_or("")));
-    }
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
-    auto *chooser = qobject_cast<CQColorChooser *>(w);
-
-    if (valueItem->propName() == "color") {
-      if (shapeItem) {
-        auto c = shapeItem->shape()->color().value(CRGBA(0, 0, 0, 0)).value();
-
-        chooser->setColor(toQColor(c));
-      }
-    }
-  }
-}
-
-//! store displayed tree widget item data in model
-void
-CQLottieObjectTreeDelegate::
-setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
-{
-  auto *item = tree_->itemFromIndex(index);
-
-  auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-  if (! valueItem) return;
-
-  auto *lottie = tree_->lottie();
-
-//auto *rootItem  = dynamic_cast<CQLottieTreeRootValueItem  *>(valueItem);
-//auto *assetItem = dynamic_cast<CQLottieTreeAssetValueItem *>(valueItem);
-  auto *layerItem = dynamic_cast<CQLottieTreeLayerValueItem *>(valueItem);
-  auto *shapeItem = dynamic_cast<CQLottieTreeShapeValueItem *>(valueItem);
-
-  if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-    auto *check = qobject_cast<QCheckBox *>(w);
-
-    if (valueItem->propName() == "hidden") {
-      valueItem->object()->setHidden(check->isChecked());
-
-      lottie->canvas()->update();
-    }
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
-    auto *edit = qobject_cast<QLineEdit *>(w);
-
-    if (valueItem->propName() == "refId") {
-      if (layerItem)
-        layerItem->layer()->setRefId(edit->text().toStdString());
-    }
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
-    auto *chooser = qobject_cast<CQColorChooser *>(w);
-
-    if (valueItem->propName() == "color") {
-      if (shapeItem)
-        shapeItem->shape()->colorRef().setValue(toRGBA(chooser->color()));
-    }
-  }
-}
-
-void
-CQLottieObjectTreeDelegate::
-updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
-                     const QModelIndex &index) const
-{
-  return QItemDelegate::updateEditorGeometry(editor, option, index);
-}
-
-QSize
-CQLottieObjectTreeDelegate::
-sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
-{
-  return QItemDelegate::sizeHint(option, index);
-}
-
-void
-CQLottieObjectTreeDelegate::
-paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const
-{
-  if (index.column() == 1) {
-    auto *item = tree_->itemFromIndex(index);
-
-    auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
-
-    if (! valueItem)
-      return QItemDelegate::paint(painter, option, index);
-
-    //---
-
-    auto *lottie = tree_->lottie();
-
-    CLottieUtil::TimeFrame timeFrame;
-    lottie->getTimeFrame(timeFrame);
-
-    //---
-
-    auto *rootItem   = dynamic_cast<CQLottieTreeRootValueItem   *>(valueItem);
-    auto *assetItem  = dynamic_cast<CQLottieTreeAssetValueItem  *>(valueItem);
-    auto *layerItem  = dynamic_cast<CQLottieTreeLayerValueItem  *>(valueItem);
-    auto *shapeItem  = dynamic_cast<CQLottieTreeShapeValueItem  *>(valueItem);
-    auto *effectItem = dynamic_cast<CQLottieTreeEffectValueItem *>(valueItem);
-
-    auto *object = valueItem->object();
-    auto *root   = (rootItem   ? rootItem  ->root  () : nullptr);
-    auto *asset  = (assetItem  ? assetItem ->asset () : nullptr);
-    auto *layer  = (layerItem  ? layerItem ->layer () : nullptr);
-    auto *shape  = (shapeItem  ? shapeItem ->shape () : nullptr);
-    auto *effect = (effectItem ? effectItem->effect() : nullptr);
-
-    if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-      std::optional<bool> b;
-
-      if (valueItem->propName() == "hidden")
-        b = object->hidden().value_or(false);
-
-      if (b)
-        drawChecked(painter, option, b.value(), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
-      std::optional<int> i;
-
-      if (valueItem->propName() == "ind") {
-        if (object->ind())
-          i = object->ind().value();
-      }
-      else {
-        if      (layer) {
-          if      (valueItem->propName() == "parentInd") {
-            if (layer->parentInd())
-              i = layer->parentInd().value();
-          }
-          else if (valueItem->propName() == "frameIn") {
-            if (layer->frameIn())
-              i = layer->frameIn().value();
-          }
-          else if (valueItem->propName() == "frameOut") {
-            if (layer->frameOut())
-              i = layer->frameOut().value();
-          }
-        }
-        else if (shape) {
-          if      (valueItem->propName() == "trim.multiple") {
-            if (shape->trim() && shape->trim()->multiple)
-              i = shape->trim()->multiple.value();
-          }
-        }
-        else if (effect) {
-          if (valueItem->propName() == "etype") {
-            if (effect->type())
-              i = effect->type().value();
-          }
-        }
-      }
-
-      if (i)
-        drawString(painter, option, QString::number(i.value()), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-      std::optional<double> r;
-
-      if      (root) {
-        if      (valueItem->propName() == "frameRate")
-          r = root->frameRate();
-        else if (valueItem->propName() == "frameStart")
-          r = root->frameStart();
-        else if (valueItem->propName() == "frameStop")
-          r = root->frameStop();
-        else if (valueItem->propName() == "width")
-          r = root->width();
-        else if (valueItem->propName() == "height")
-          r = root->height();
-      }
-      else if (layer) {
-        if (valueItem->propName() == "opacity") {
-          if (layer->transform())
-            r = layer->transform()->opacity.value(100.0);
-        }
-      }
-      else if (shape) {
-        if (valueItem->propName() == "opacity") {
-          std::optional<double> opacity;
-
-          if      (shape->fill() && shape->fill()->opacity.isSet())
-            r = shape->fill()->opacity.value(100.0);
-          else if (shape->stroke() && shape->stroke()->opacity.isSet())
-            r = shape->stroke()->opacity.value(100.0);
-          else if (shape->transform() && shape->transform()->opacity.isSet())
-            r = shape->transform()->opacity.value(100.0);
-        }
-      }
-
-      if (r)
-        drawString(painter, option, QString::number(r.value()), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
-      std::optional<QString>     str;
-      std::optional<std::string> cstr;
-
-      if      (valueItem->propName() == "name") {
-        if (object->name())
-          cstr = object->name().value();
-      }
-      else if (valueItem->propName() == "type") {
-        cstr = object->type();
-      }
-      else {
-        if      (asset) {
-          if (valueItem->propName() == "id")
-            cstr = asset->id();
-        }
-        else if (layer) {
-          if      (valueItem->propName() == "typeId") {
-            if (layer->typeId()) {
-              int typeId = layer->typeId().value();
-
-              str = QString::fromStdString(CLottieLayer::typeIdName(typeId)) +
-                       " (" + QString::number(typeId) + ")";
-            }
-          }
-          else if (valueItem->propName() == "refId") {
-            if (layer->precomp() && layer->precomp()->refId)
-              cstr = layer->precomp()->refId.value();
-            else if (layer->refId())
-              cstr = layer->refId().value();
-          }
-        }
-      }
-
-      if (cstr)
-        str = QString::fromStdString(cstr.value());
-
-      if (str)
-        drawString(painter, option, str.value(), index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
-      std::optional<CRGBA> c;
-
-      if (shape) {
-        if (valueItem->propName() == "color") {
-          if      (shape->fill() && shape->fill()->color.isSet())
-            c = shape->fill()->color.value(CRGBA(0, 0, 0, 0));
-          else if (shape->stroke() && shape->stroke()->color.isSet())
-            c = shape->stroke()->color.value(CRGBA(0, 0, 0, 0));
-          else if (shape->color().isSet())
-            c = shape->color().value(CRGBA(0, 0, 0, 0));
-        }
-      }
-
-      if (c)
-        drawColor(painter, option, toQColor(c.value()), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
-      std::optional<double> r;
-
-      if (shape) {
-        if      (valueItem->propName() == "trim.start") {
-          if (shape->trim() && shape->trim()->start.isSet())
-            r = shape->trim()->start.tvalue(timeFrame, 0.0);
-        }
-        else if (valueItem->propName() == "trim.end") {
-          if (shape->trim() && shape->trim()->end.isSet())
-            r = shape->trim()->end.tvalue(timeFrame, 0.0);
-        }
-        else if (valueItem->propName() == "trim.offset") {
-          if (shape->trim() && shape->trim()->offset.isSet())
-            r = shape->trim()->offset.tvalue(timeFrame, 0.0);
-        }
-      }
-
-      if (r)
-        drawString(painter, option, QString::number(r.value()), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::POSITION) {
-      std::optional<CPoint2D> p;
-
-      if (shape) {
-        if (valueItem->propName() == "position") {
-          auto positionxy = shape->pos().tvalue(timeFrame, CLottie::XYVals());
-
-          p = positionxy.toPoint(CPoint2D(0, 0));
-        }
-      }
-
-      if (p)
-        drawString(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else if (valueItem->propType() == CQLottieTreeValueItem::Type::SIZE) {
-      std::optional<CPoint2D> p;
-
-      if (shape) {
-        if (valueItem->propName() == "size") {
-          auto sizexy = shape->size().tvalue(timeFrame, CLottie::XYVals());
-
-          p = sizexy.toPoint(CPoint2D(0, 0));
-        }
-      }
-
-      if (p)
-        drawString(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
-      else
-        drawString(painter, option, "<unset>", index);
-    }
-    else
-      return QItemDelegate::paint(painter, option, index);
-  }
-  else
-    return QItemDelegate::paint(painter, option, index);
-}
-
-void
-CQLottieObjectTreeDelegate::
-drawChecked(QPainter *painter, const QStyleOptionViewItem &option,
-            bool checked, const QModelIndex &index) const
-{
-  QItemDelegate::drawBackground(painter, option, index);
-
-  auto checkState = (checked ? Qt::Checked : Qt::Unchecked);
-
-  auto rect = option.rect;
-
-  rect.setWidth(option.rect.height());
-
-  rect.adjust(0, 1, -3, -2);
-
-  QItemDelegate::drawCheck(painter, option, rect, checkState);
-
-  QFontMetrics fm(painter->font());
-
-  int x = rect.right() + 4;
-//int y = rect.top() + fm.ascent();
-
-  QRect rect1;
-
-  rect1.setCoords(x, option.rect.top(), option.rect.right(), option.rect.bottom());
-
-  //painter->drawText(x, y, (checked ? "true" : "false"));
-  QItemDelegate::drawDisplay(painter, option, rect1, checked ? "true" : "false");
-}
-
-void
-CQLottieObjectTreeDelegate::
-drawColor(QPainter *painter, const QStyleOptionViewItem &option,
-          const QColor &c, const QModelIndex &index) const
-{
-  QItemDelegate::drawBackground(painter, option, index);
-
-  auto rect = option.rect;
-
-  rect.setWidth(option.rect.height());
-
-  rect.adjust(0, 1, -3, -2);
-
-  painter->setBrush(QBrush(c));
-  painter->setPen(QColor(Qt::black)); // TODO: contrast border
-
-//painter->fillRect(rect, QBrush(c));
-  painter->drawRect(rect);
-
-  int x = rect.right() + 2;
-//int y = rect.top() + fm.ascent();
-
-  QRect rect1;
-
-  rect1.setCoords(x, option.rect.top(), option.rect.right(), option.rect.bottom());
-
-  QItemDelegate::drawDisplay(painter, option, rect1, c.name());
-}
-
-void
-CQLottieObjectTreeDelegate::
-drawString(QPainter *painter, const QStyleOptionViewItem &option,
-           const QString &str, const QModelIndex &index) const
-{
-  QItemDelegate::drawBackground(painter, option, index);
-
-  auto rect = option.rect;
-
-  QItemDelegate::drawDisplay(painter, option, rect, str);
-}
-
-//---
-
-CQLottieTreeValueItem::
-CQLottieTreeValueItem(QTreeWidgetItem *parent, CLottieObject *object,
-                      const QString &propName, const Type &propType) :
- QTreeWidgetItem(parent, QStringList() << propName), object_(object),
- propName_(propName), propType_(propType)
-{
-  setFlags(flags() | Qt::ItemIsEditable);
-}
-
-CQLottieTreeRootValueItem::
-CQLottieTreeRootValueItem(QTreeWidgetItem *parent, CLottieRoot *root,
-                          const QString &propName, const Type &propType) :
- CQLottieTreeValueItem(parent, root, propName, propType), root_(root)
-{
-}
-
-CQLottieTreeAssetValueItem::
-CQLottieTreeAssetValueItem(QTreeWidgetItem *parent, CLottieAsset *asset,
-                           const QString &propName, const Type &propType) :
- CQLottieTreeValueItem(parent, asset, propName, propType), asset_(asset)
-{
-}
-
-CQLottieTreeLayerValueItem::
-CQLottieTreeLayerValueItem(QTreeWidgetItem *parent, CLottieLayer *layer,
-                           const QString &propName, const Type &propType) :
- CQLottieTreeValueItem(parent, layer, propName, propType), layer_(layer)
-{
-}
-
-CQLottieTreeShapeValueItem::
-CQLottieTreeShapeValueItem(QTreeWidgetItem *parent, CLottieShape *shape,
-                           const QString &propName, const Type &propType) :
- CQLottieTreeValueItem(parent, shape, propName, propType), shape_(shape)
-{
-}
-
-CQLottieTreeEffectValueItem::
-CQLottieTreeEffectValueItem(QTreeWidgetItem *parent, CLottieEffect *effect,
-                            const QString &propName, const Type &propType) :
- CQLottieTreeValueItem(parent, effect, propName, propType), effect_(effect)
-{
+  lottie_->updateAll();
 }

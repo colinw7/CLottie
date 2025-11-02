@@ -5,17 +5,22 @@
 #include <CDisplayRange2D.h>
 
 #include <QFrame>
-#include <QItemDelegate>
-#include <QTreeWidget>
-#include <QTreeWidgetItem>
+
+#include <deque>
 
 class CQLottieCanvas;
+class CQLottieToolBar;
+class CQLottieSettings;
 class CQLottieTree;
+class CQLottieLayer;
 class CQLottieObjectTree;
+
+class CQColorEdit;
 class CBezierPath;
 
 class QLabel;
 class QTimer;
+class QPainterPathStroker;
 
 class CQLottie : public QWidget {
   Q_OBJECT
@@ -34,26 +39,45 @@ class CQLottie : public QWidget {
   void setDebug(bool b);
   void setPrint(bool b);
 
+  bool isDoubleBuffer() const { return doubleBuffer_; }
+  void setDoubleBuffer(bool b) { doubleBuffer_ = b; }
+
   bool load(const std::string &filename);
 
   void setPixelSize(int w, int h);
 
-  void draw(QPainter *painter);
+  void draw(QPainter *painter, bool update);
 
   void zoom(bool zoomIn);
   void scroll(double dx, double dy);
+  void zoomFull();
 
   void mouseMove(const QPoint &pos);
 
   void getTimeFrame(CLottieUtil::TimeFrame &timeFrame) const;
 
- private Q_SLOTS:
+  const QColor &bgColor() const { return bgColor_; }
+  void setBgColor(const QColor &c) { bgColor_ = c; }
+
+  const QColor &selectedPenColor() const { return selectedPenColor_; }
+  void setSelectedPenColor(const QColor &c) { selectedPenColor_ = c; }
+
+  const QColor &selectedBrushColor() const { return selectedBrushColor_; }
+  void setSelectedBrushColor(const QColor &c) { selectedBrushColor_ = c; }
+
+  const QColor &bboxPenColor() const { return bboxPenColor_; }
+  void setBBoxPenColor(const QColor &c) { bboxPenColor_ = c; }
+
+  void updateAll();
+
+ public Q_SLOTS:
   void loadSlot();
 
   void playSlot();
   void pauseSlot();
   void stepSlot();
 
+ private Q_SLOTS:
   void tickSlot();
 
  private:
@@ -61,13 +85,10 @@ class CQLottie : public QWidget {
   using OptReal  = std::optional<double>;
   using OptColor = std::optional<CRGBA>;
 
+  using Layers = std::vector<CLottieLayer *>;
+
   struct DrawState {
-    using TimeFrame = CLottieUtil::TimeFrame;
-
-    TimeFrame timeFrame;
-
-    CMatrix2D preMatrix { CMatrix2D::identity() };
-    CMatrix2D matrix    { CMatrix2D::identity() };
+    using Paths = std::vector<CBezierPath>;
 
     struct Fill {
       const CLottieShape* shape { nullptr };
@@ -76,8 +97,6 @@ class CQLottie : public QWidget {
       OptReal  opacity;
       int      rule  { 1 };
     };
-
-    Fill fill;
 
     struct Stroke {
       const CLottieShape* shape { nullptr };
@@ -90,8 +109,6 @@ class CQLottie : public QWidget {
       OptReal  miterLimit;
     };
 
-    Stroke stroke;
-
     struct Gradient {
       bool            enabled { false };
       QLinearGradient gradient;
@@ -102,16 +119,11 @@ class CQLottie : public QWidget {
       OptReal         miterLimit;
     };
 
-    Gradient fillGradient;
-    Gradient strokeGradient;
-
     struct Transform {
       using Shapes = std::vector<const CLottieShape *>;
 
       Shapes shapes;
     };
-
-    Transform transform;
 
     struct Trim {
       const CLottieShape* shape  { nullptr };
@@ -121,18 +133,13 @@ class CQLottie : public QWidget {
       int                 mult   { 1 };
     };
 
-    std::optional<Trim> trim;
-
-    using Paths = std::vector<QPainterPath>;
-
     struct Merge {
       const CLottieShape* shape { nullptr };
       int                 mode  { 0 };
       Paths               paths;
     };
 
-    std::optional<Merge> merge;
-
+#if 0
     struct Repeat {
       int                 copies       { 0 };
       double              offset       { 0.0 };
@@ -141,47 +148,109 @@ class CQLottie : public QWidget {
       double              startOpacity { 1.0 };
       double              endOpacity   { 1.0 };
     };
+#endif
 
+    //---
+
+    QPainter *painter { nullptr };
+
+    CQLottieLayer *layer { nullptr };
+
+    using TimeFrame = CLottieUtil::TimeFrame;
+
+    TimeFrame timeFrame;
+
+    CMatrix2D matrix { CMatrix2D::identity() };
+
+    Fill fill;
+
+    Stroke stroke;
+
+    //---
+
+#if 0
+    std::vector<CDisplayRange2D> displayRanges;
+#else
+    CDisplayRange2D displayRange;
+#endif
+
+    Transform transform;
+
+    Gradient fillGradient;
+    Gradient strokeGradient;
+
+    std::optional<Trim>  trim;
+    std::optional<Merge> merge;
+
+    std::deque<CLottieObject *> objects;
+
+#if 0
     std::optional<Repeat> repeat;
+#endif
+
+    int frameDelta { 0 };
+
+    OptInt    repeatInd;
+//  OptReal   repeatOpacity;
+//  CMatrix2D repeatMatrix;
+
+    QPainterPathStroker *stroker { nullptr };
+
+    CMatrix2D getDisplayMatrix() const {
+#if 0
+      CMatrix2D pmatrix = CMatrix2D::identity();
+
+      for (const auto &displayRange : displayRanges)
+        pmatrix = pmatrix*displayRange.getMatrix();
+
+      return pmatrix;
+#else
+      return displayRange.getMatrix();
+#endif
+    }
   };
 
-  void drawRoot (QPainter *painter, const CLottieRoot *root);
-  void drawLayer(QPainter *painter, const DrawState &state, const CLottieLayer *layer);
-  void drawShape(QPainter *painter, DrawState &state, const CLottieShape *shape);
+  void drawRoot(const DrawState &state, const CLottieRoot *root, bool update);
 
-  void gradientFill  (DrawState &state, const CLottieShape *shape);
-  void gradientStroke(DrawState &state, const CLottieShape *shape);
+  void drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool update);
 
-  void drawLayerShapes(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer);
+  void drawLayer(const DrawState &state, CLottieLayer *layer, bool update);
+  void drawShape(DrawState &state, CLottieShape *shape);
 
-  void drawMergeShapes(QPainter *painter, const DrawState &drawState);
+  void gradientFillShape  (DrawState &state, const CLottieShape *shape);
+  void gradientStrokeShape(DrawState &state, const CLottieShape *shape);
 
-  void drawAsset(QPainter *painter, const DrawState &drawState, const CLottieAsset *asset);
+  void drawLayerShapes(DrawState &drawState, const CLottieLayer *layer);
 
-  void drawPrecompLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer);
+  void drawMergeShapes(DrawState &drawState);
 
-  void drawSolidLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer);
+  void drawAsset(const DrawState &drawState, CLottieAsset *asset);
 
-  void drawImageLayer(QPainter *painter, const DrawState &drawState, const CLottieLayer *layer);
+  void drawPrecompLayer(const DrawState &drawState, const CLottieLayer *layer);
 
-  void drawEllipse  (QPainter *painter, DrawState &state, const CLottieShape *shape);
-  void drawPath     (QPainter *painter, DrawState &state, const CLottieShape *shape);
-  void drawPolystar (QPainter *painter, DrawState &state, const CLottieShape *shape);
-  void drawRectangle(QPainter *painter, DrawState &state, const CLottieShape *shape);
+  void drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer);
 
-  void drawBezierPath(QPainter *painter, DrawState &drawState, const CLottieShape *shape,
-                      CBezierPath &bezierPath);
+  void drawImageLayer(const DrawState &drawState, const CLottieLayer *layer);
+
+  void drawEllipse  (DrawState &state, const CLottieShape *shape);
+  void drawPath     (DrawState &state, const CLottieShape *shape);
+  void drawPolystar (DrawState &state, const CLottieShape *shape);
+  void drawRectangle(DrawState &state, const CLottieShape *shape);
+
+  void drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bezierPath);
 
   void pathToBezier(const CLottie::BezierProperty &path, const DrawState &drawState,
                     CBezierPath &bezierPath) const;
 
-  void setPenBrush(QPainter *painter, const DrawState &drawState, const CLottieShape *shape);
+  void setPenBrush(DrawState &drawState, const CLottieShape *shape);
 
   void setSelectedPenBrush(QPainter *painter);
   void setBBoxPenBrush(QPainter *painter);
 
   CMatrix2D getLayerMatrix(const DrawState &drawState, const CLottieLayer *layer) const;
   CMatrix2D getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const;
+
+  CMatrix2D calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const;
 
   CMatrix2D getTransformMatrix(const DrawState &drawState, CLottie::Transform *transform) const;
 
@@ -198,8 +267,13 @@ class CQLottie : public QWidget {
   OptReal getStrokeOpacity(const DrawState &drawState, const CLottieShape *shape,
                            const OptReal &def) const;
 
+  double getRepeatOpacity(const DrawState &drawState, CLottieRepeater *repeater) const;
+
+  QImage matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer) const;
+
  private:
-  QFrame*             toolbar_     { nullptr };
+  CQLottieToolBar*    toolbar_     { nullptr };
+  CQLottieSettings*   settings_    { nullptr };
   CQLottieCanvas*     canvas_      { nullptr };
   QFrame*             status_      { nullptr };
   QLabel*             statusLabel_ { nullptr };
@@ -210,6 +284,8 @@ class CQLottie : public QWidget {
   CLottie* lottie_ { nullptr };
 
   CDisplayRange2D displayRange_;
+
+  bool doubleBuffer_ { false };
 
   bool running_ { false };
 
@@ -224,6 +300,11 @@ class CQLottie : public QWidget {
   using AssetImage = std::map<std::string, QImage>;
 
   AssetImage assetImage_;
+
+  QColor bgColor_            { Qt::white };
+  QColor selectedPenColor_   { Qt::red };
+  QColor selectedBrushColor_ { Qt::white };
+  QColor bboxPenColor_       { Qt::red };
 };
 
 //---
@@ -233,6 +314,8 @@ class CQLottieCanvas : public QWidget {
 
  public:
   CQLottieCanvas(CQLottie *lottie);
+
+  void invalidate();
 
   void resizeEvent(QResizeEvent *) override;
 
@@ -246,362 +329,122 @@ class CQLottieCanvas : public QWidget {
 
  private:
   CQLottie* lottie_ { nullptr };
+
+  bool needsUpdate_ { true };
 };
 
 //---
 
-class CQLottieTreeWidget;
-
-class CQLottieTree : public QFrame {
-  Q_OBJECT
-
+class CQLottieAsset : public CLottieAsset {
  public:
-  CQLottieTree(CQLottie *lottie);
-
-  CQLottie *lottie() const { return lottie_; }
-
-  CQLottieTreeWidget *tree() const { return tree_; }
-
-  void resizeEvent(QResizeEvent *) override;
-
-  void load();
-
-  QSize sizeHint() const override { return QSize(600, 1600); }
-
-  QTreeWidgetItem *itemFromIndex(const QModelIndex &index) const;
-
- private:
-  void connectSlots(bool b);
-
-  QTreeWidgetItem *createRootItem  (CLottieRoot   *root  );
-  QTreeWidgetItem *createAssetItem (CLottieAsset  *asset );
-  QTreeWidgetItem *createLayerItem (CLottieLayer  *layer );
-  QTreeWidgetItem *createShapeItem (CLottieShape  *layer );
-  QTreeWidgetItem *createEffectItem(CLottieEffect *effect);
-
- private Q_SLOTS:
-  void itemClickedSlot (QTreeWidgetItem *item, int column);
-  void itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *);
-
-  void customContextMenuSlot(const QPoint &pos);
-
-  void expandAll  (const QModelIndex &ind=QModelIndex());
-  void collapseAll(const QModelIndex &ind=QModelIndex());
-
-  void transformSlot();
-  void hierTransformSlot();
-  void printSlot();
-
- private:
-  CQLottie*           lottie_ { nullptr };
-  CQLottieTreeWidget* tree_   { nullptr };
-
-  using AssetItem  = std::map<CLottieAsset  *, QTreeWidgetItem *>;
-  using LayerItem  = std::map<CLottieLayer  *, QTreeWidgetItem *>;
-  using ShapeItem  = std::map<CLottieShape  *, QTreeWidgetItem *>;
-  using EffectItem = std::map<CLottieEffect *, QTreeWidgetItem *>;
-
-  QTreeWidgetItem *rootItem_ { nullptr };
-
-  AssetItem  assetItem_;
-  LayerItem  layerItem_;
-  ShapeItem  shapeItem_;
-  EffectItem effectItem_;
-};
-
-//---
-
-class CQLottieTreeWidget : public QTreeWidget {
-  Q_OBJECT
-
- public:
-  CQLottieTreeWidget(CQLottieTree *tree);
-
-  QModelIndex indexFromItem(const QTreeWidgetItem *item, int column=0) const {
-    return QTreeWidget::indexFromItem(item, column);
+  CQLottieAsset(CQLottie *lottie) :
+   CLottieAsset(lottie->lottie()), lottie_(lottie) {
   }
 
  private:
-  CQLottieTree* tree_ { nullptr };
+  CQLottie *lottie_ { nullptr };
 };
 
 //---
 
-class CQLottieTreeDelegate : public QItemDelegate {
-  Q_OBJECT
-
+class CQLottieLayer : public CLottieLayer {
  public:
-  CQLottieTreeDelegate(CQLottieTree *lottie);
+  CQLottieLayer(CQLottie *lottie);
+ ~CQLottieLayer() override;
 
-  QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
-                        const QModelIndex &index) const override;
+  bool isEnabled() const { return enabled_; }
+  void setEnabled(bool b) { enabled_ = b; }
 
-  void setEditorData(QWidget *editor, const QModelIndex &index) const override;
+  bool isChanged() const { return changed_; }
+  void setChanged(bool b) { changed_ = b; }
 
-  void setModelData(QWidget *editor, QAbstractItemModel *model,
-                    const QModelIndex &index) const override;
+  bool isDoubleBuffer() const { return doubleBuffer_; }
+  void setDoubleBuffer(bool b) { doubleBuffer_ = b; }
 
-  void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
-                            const QModelIndex &index) const override;
+  int width () const { return w_; }
+  int height() const { return h_; }
 
-  QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+  CQLottieLayer *matteLayer() const { return matteLayer_; }
+  void setMatteLayer(CQLottieLayer *l) { matteLayer_ = l; }
 
-  void paint(QPainter *painter, const QStyleOptionViewItem &option,
-             const QModelIndex &index) const override;
+  void resize(int w, int h);
+
+  QPainter *painter();
+
+  const QImage &image() const { return image_; }
+
+  void clear();
 
  private:
-  CQLottieTree* tree_ { nullptr };
+  CQLottie *lottie_ { nullptr };
+
+  int w_ { 0 };
+  int h_ { 0 };
+
+  bool enabled_      { true };
+  bool changed_      { false };
+  bool doubleBuffer_ { false };
+
+  CQLottieLayer* matteLayer_ { nullptr };
+
+  QImage    image_;
+  QPainter* painter_ { nullptr };
 };
 
-//---
-
-class CQLottieTreeObjectItem : public QTreeWidgetItem {
+class CQLottieShape : public CLottieShape {
  public:
-  CQLottieTreeObjectItem(QTreeWidget *parent, CLottieObject *object);
-  CQLottieTreeObjectItem(QTreeWidgetItem *parent, CLottieObject *object);
-
-  virtual ~CQLottieTreeObjectItem() { }
-
-  CLottieObject *object() const { return object_; }
-
- private:
-  CLottieObject* object_ { nullptr };
-};
-
-class CQLottieTreeRootItem : public CQLottieTreeObjectItem {
- public:
-  CQLottieTreeRootItem(QTreeWidget *parent, CLottieRoot *root);
-
-  CLottieRoot *root() const { return root_; }
-
- private:
-  CLottieRoot* root_ { nullptr };
-};
-
-class CQLottieTreeAssetItem : public CQLottieTreeObjectItem {
- public:
-  CQLottieTreeAssetItem(QTreeWidgetItem *parent, CLottieAsset *asset);
-
-  CLottieAsset *asset() const { return asset_; }
-
- private:
-  CLottieAsset* asset_ { nullptr };
-};
-
-class CQLottieTreeLayerItem : public CQLottieTreeObjectItem {
- public:
-  CQLottieTreeLayerItem(QTreeWidgetItem *parent, CLottieLayer *layer);
-
-  CLottieLayer *layer() const { return layer_; }
-
- private:
-  CLottieLayer* layer_ { nullptr };
-};
-
-class CQLottieTreeShapeItem : public CQLottieTreeObjectItem {
- public:
-  CQLottieTreeShapeItem(QTreeWidgetItem *parent, CLottieShape *shape);
-
-  CLottieShape *shape() const { return shape_; }
-
- private:
-  CLottieShape* shape_ { nullptr };
-};
-
-class CQLottieTreeEffectItem : public CQLottieTreeObjectItem {
- public:
-  CQLottieTreeEffectItem(QTreeWidgetItem *parent, CLottieEffect *effect);
-
-  CLottieEffect *effect() const { return effect_; }
-
- private:
-  CLottieEffect* effect_ { nullptr };
-};
-
-class CQLottieTreeValueItem : public QTreeWidgetItem {
- public:
-  enum class Type {
-    NONE,
-    BOOL,
-    INTEGER,
-    REAL,
-    STRING,
-    COLOR,
-    POSITION,
-    SIZE,
-    SCALAR
-  };
-
- public:
-  CQLottieTreeValueItem(QTreeWidgetItem *parent, CLottieObject *object,
-                        const QString &propName, const Type &propType);
-  virtual ~CQLottieTreeValueItem() { }
-
-  const QString& propName() const { return propName_; }
-  const Type&    propType() const { return propType_; }
-
-  CLottieObject *object() const { return object_; }
-
- protected:
-  CLottieObject* object_ { nullptr };
-
-  QString propName_;
-  Type    propType_ { Type::NONE };
-};
-
-class CQLottieTreeRootValueItem : public CQLottieTreeValueItem {
- public:
-  CQLottieTreeRootValueItem(QTreeWidgetItem *parent, CLottieRoot *root,
-                            const QString &propName, const Type &propType);
-
-  CLottieRoot *root() const { return root_; }
-
- private:
-  CLottieRoot* root_ { nullptr };
-};
-
-class CQLottieTreeAssetValueItem : public CQLottieTreeValueItem {
- public:
-  CQLottieTreeAssetValueItem(QTreeWidgetItem *parent, CLottieAsset *asset,
-                             const QString &propName, const Type &propType);
-
-  CLottieAsset *asset() const { return asset_; }
-
- private:
-  CLottieAsset* asset_ { nullptr };
-};
-
-class CQLottieTreeLayerValueItem : public CQLottieTreeValueItem {
- public:
-  CQLottieTreeLayerValueItem(QTreeWidgetItem *parent, CLottieLayer *layer,
-                             const QString &propName, const Type &propType);
-
-  CLottieLayer *layer() const { return layer_; }
-
- private:
-  CLottieLayer* layer_ { nullptr };
-};
-
-class CQLottieTreeShapeValueItem : public CQLottieTreeValueItem {
- public:
-  CQLottieTreeShapeValueItem(QTreeWidgetItem *parent, CLottieShape *shape,
-                             const QString &propName, const Type &propType);
-
-  CLottieShape *shape() const { return shape_; }
-
- private:
-  CLottieShape* shape_ { nullptr };
-};
-
-class CQLottieTreeEffectValueItem : public CQLottieTreeValueItem {
- public:
-  CQLottieTreeEffectValueItem(QTreeWidgetItem *parent, CLottieEffect *effect,
-                              const QString &propName, const Type &propType);
-
-  CLottieEffect *effect() const { return effect_; }
-
- private:
-  CLottieEffect* effect_ { nullptr };
-};
-
-//---
-
-class CQLottieObjectTreeWidget;
-
-class CQLottieObjectTree : public QFrame {
-  Q_OBJECT
-
- public:
-  CQLottieObjectTree(CQLottie *lottie);
-
-  CQLottie *lottie() const { return lottie_; }
-
-  CQLottieObjectTreeWidget *tree() const { return tree_; }
-
-  void setObject(CLottieObject *object);
-
-  QSize sizeHint() const override { return QSize(600, 1600); }
-
-  QTreeWidgetItem *itemFromIndex(const QModelIndex &index) const;
-
- private:
-  void load();
-
-  void connectSlots(bool b);
-
- private Q_SLOTS:
-  void itemClickedSlot (QTreeWidgetItem *item, int column);
-  void itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *);
-
-  void customContextMenuSlot(const QPoint &pos);
-
-  void expandAll  (const QModelIndex &ind=QModelIndex());
-  void collapseAll(const QModelIndex &ind=QModelIndex());
-
-  void printSlot();
-
- private:
-  CQLottie*                 lottie_ { nullptr };
-  CQLottieObjectTreeWidget* tree_   { nullptr };
-  CLottieObject*            object_ { nullptr };
-};
-
-//---
-
-class CQLottieObjectTreeWidget : public QTreeWidget {
-  Q_OBJECT
-
- public:
-  CQLottieObjectTreeWidget(CQLottieObjectTree *tree);
-
-  QModelIndex indexFromItem(const QTreeWidgetItem *item, int column=0) const {
-    return QTreeWidget::indexFromItem(item, column);
+  CQLottieShape(CQLottie *lottie) :
+   CLottieShape(lottie->lottie()), lottie_(lottie) {
   }
 
  private:
-  CQLottieObjectTree* tree_ { nullptr };
+  CQLottie *lottie_ { nullptr };
 };
 
 //---
 
-class CQLottieObjectTreeDelegate : public QItemDelegate {
+class CQLottieToolBar : public QFrame {
   Q_OBJECT
 
  public:
-  CQLottieObjectTreeDelegate(CQLottieObjectTree *lottie);
-
-  QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
-                        const QModelIndex &index) const override;
-
-  void setEditorData(QWidget *editor, const QModelIndex &index) const override;
-
-  void setModelData(QWidget *editor, QAbstractItemModel *model,
-                    const QModelIndex &index) const override;
-
-  void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
-                            const QModelIndex &index) const override;
-
-  QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
-
-  void paint(QPainter *painter, const QStyleOptionViewItem &option,
-             const QModelIndex &index) const override;
-
-  void drawChecked(QPainter *painter, const QStyleOptionViewItem &option,
-                   bool checked, const QModelIndex &index) const;
-  void drawColor(QPainter *painter, const QStyleOptionViewItem &option,
-                 const QColor &c, const QModelIndex &index) const;
-  void drawString(QPainter *painter, const QStyleOptionViewItem &option,
-                  const QString &str, const QModelIndex &index) const;
+  CQLottieToolBar(CQLottie *lottie);
 
  private Q_SLOTS:
-  void updateValue();
+  void loadSlot();
+
+  void playSlot();
+  void pauseSlot();
+  void stepSlot();
 
  private:
-  CQLottieObjectTree* tree_ { nullptr };
-
-  mutable QModelIndex editIndex_;
+  CQLottie *lottie_ { nullptr };
 };
 
 //---
+
+class CQLottieSettings : public QFrame {
+  Q_OBJECT
+
+ public:
+  CQLottieSettings(CQLottie *lottie);
+
+ private Q_SLOTS:
+  void bgFillSlot(const QColor &);
+  void selectedFillSlot(const QColor &);
+  void selectedStrokeSlot(const QColor &);
+  void bboxStrokeSlot(const QColor &);
+
+ private:
+  void connectSlots(bool b);
+  void updateWidgets();
+
+ private:
+  CQLottie *lottie_ { nullptr };
+
+  CQColorEdit *bgFillEdit_       { nullptr };
+  CQColorEdit *selectFillEdit_   { nullptr };
+  CQColorEdit *selectStrokeEdit_ { nullptr };
+  CQColorEdit *bboxStrokeEdit_   { nullptr };
+};
 
 #endif
