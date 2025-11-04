@@ -16,12 +16,22 @@ CONFIG += c++17
 SOURCES += \
 CQLottieMain.cpp \
 CQLottie.cpp \
+CQLottieCanvas.cpp \
 CQLottieTree.cpp \
+CQLottieSettings.cpp \
+CQLottieToolBar.cpp \
+CQLottieStatusBar.cpp \
+CQLottieTimeLine.cpp \
 
 HEADERS += \
 CQLottieMain.h \
 CQLottie.h \
+CQLottieCanvas.h \
 CQLottieTree.h \
+CQLottieSettings.h \
+CQLottieToolBar.h \
+CQLottieStatusBar.h \
+CQLottieTimeLine.h \
 
 OBJECTS_DIR = ../obj
 

@@ -1,22 +1,21 @@
 #include <CQLottie.h>
+#include <CQLottieCanvas.h>
+#include <CQLottieToolBar.h>
+#include <CQLottieStatusBar.h>
+#include <CQLottieTimeLine.h>
 #include <CQLottieTree.h>
+#include <CQLottieSettings.h>
 #include <CLottie.h>
+
 #include <CEncode64.h>
 #include <CBezierPath.h>
 #include <CArcToBezier.h>
 
-#include <CQIconButton.h>
-#include <CQColorEdit.h>
-#include <CQUtil.h>
-
 #include <QTabWidget>
-#include <QPushButton>
 #include <QLabel>
-#include <QLineEdit>
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPainterPath>
-#include <QKeyEvent>
 #include <QTimer>
 #include <QFileDialog>
 
@@ -28,6 +27,7 @@
 #include <svg/play_svg.h>
 #include <svg/pause_svg.h>
 #include <svg/play_one_svg.h>
+#include <svg/clock_svg.h>
 
 //---
 
@@ -255,19 +255,15 @@ CQLottie()
 
   //---
 
-  status_ = new QFrame;
-  status_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  timeLine_ = new CQLottieTimeLine(this);
+
+  layout->addWidget(timeLine_);
+
+  //---
+
+  status_ = new CQLottieStatusBar(this);
 
   layout->addWidget(status_);
-
-  auto *slayout = new QHBoxLayout(status_);
-
-  ticksLabel_  = new QLabel(" ");
-  statusLabel_ = new QLabel(" ");
-
-  slayout->addWidget(statusLabel_);
-  slayout->addStretch(1);
-  slayout->addWidget(ticksLabel_);
 
   //---
 
@@ -280,6 +276,10 @@ CQLottie()
   timer_ = new QTimer;
 
   connect(timer_, SIGNAL(timeout()), this, SLOT(tickSlot()));
+
+  //---
+
+  setShowTimeLine(false);
 }
 
 void
@@ -308,7 +308,7 @@ load(const std::string &filename)
   int w = root->width ().value_or(100);
   int h = root->height().value_or(100);
 
-//displayRange_.setEqualScale(true);
+  displayRange_.setEqualScale(equalScale_);
   displayRange_.setWindowRange(0, 0, w, h);
 
   fps_ = std::max(root->frameRate().value_or(1.0), 1.0);
@@ -326,9 +326,20 @@ load(const std::string &filename)
 
 void
 CQLottie::
+setEqualScale(bool b)
+{
+  equalScale_ = b;
+
+  displayRange_.setEqualScale(b);
+}
+
+void
+CQLottie::
 setPixelSize(int w, int h)
 {
+  displayRange_.setEqualScale(equalScale_);
   displayRange_.setPixelRange(0, h - 1, w - 1, 0);
+
 }
 
 void
@@ -385,7 +396,7 @@ CQLottie::
 tickSlot()
 {
   if (! running_) {
-    ticksLabel_->setText(QString("Frame: %1 (%2 secs)").arg(ticks_).arg(secs_));
+    status_->setTicksLabel(QString("Frame: %1 (%2 secs)").arg(ticks_).arg(secs_));
     return;
   }
 
@@ -406,11 +417,13 @@ tickSlot()
     isecs_ = 0;
   }
 
-  ticksLabel_->setText(QString("Frame: %1 (%2 secs)").arg(ticks_).arg(secs_));
+  status_->setTicksLabel(QString("Frame: %1 (%2 secs)").arg(ticks_).arg(secs_));
 
   update();
 
   canvas_->invalidate();
+
+  timeLine_->update();
 }
 
 void
@@ -659,16 +672,14 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 
   //---
 
-  if (layer->isHierSelected()) {
-    if (layer->bbox().isSet()) {
-      auto displayMatrix = drawState.getDisplayMatrix();
+  if (isShowBBox() && layer->isHierSelected() && layer->bbox().isSet()) {
+    auto displayMatrix = drawState.getDisplayMatrix();
 
-      drawState.painter->setTransform(toQTransform(displayMatrix));
+    drawState.painter->setTransform(toQTransform(displayMatrix));
 
-      setBBoxPenBrush(drawState.painter);
+    setBBoxPenBrush(drawState.painter);
 
-      drawState.painter->drawRect(toQRect(layer->bbox()));
-    }
+    drawState.painter->drawRect(toQRect(layer->bbox()));
   }
 }
 
@@ -843,7 +854,7 @@ drawMergeShapes(DrawState &drawState)
 
   //---
 
-  if (drawState.merge->shape->isHierSelected()) {
+  if (isShowSelect() && drawState.merge->shape->isHierSelected()) {
     setSelectedPenBrush(drawState.painter);
 
     drawState.painter->drawPath(path);
@@ -936,16 +947,14 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
 
   //---
 
-  if (asset->isHierSelected()) {
-    if (asset->bbox().isSet()) {
-      auto displayMatrix = drawState.getDisplayMatrix();
+  if (isShowBBox() && asset->isHierSelected() && asset->bbox().isSet()) {
+    auto displayMatrix = drawState.getDisplayMatrix();
 
-      drawState.painter->setTransform(toQTransform(displayMatrix));
+    drawState.painter->setTransform(toQTransform(displayMatrix));
 
-      setBBoxPenBrush(drawState.painter);
+    setBBoxPenBrush(drawState.painter);
 
-      drawState.painter->drawRect(toQRect(asset->bbox()));
-    }
+    drawState.painter->drawRect(toQRect(asset->bbox()));
   }
 }
 
@@ -1514,20 +1523,20 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
 
   //---
 
-  if (shape->isHierSelected()) {
+  if (isShowSelect() && shape->isHierSelected()) {
     setSelectedPenBrush(drawState.painter);
 
     drawState.painter->drawPath(path);
+  }
 
-    if (shape->bbox().isSet()) {
-      auto displayMatrix = pmatrix;
+  if (isShowBBox() && shape->isHierSelected() && shape->bbox().isSet()) {
+    auto displayMatrix = pmatrix;
 
-      drawState.painter->setTransform(toQTransform(displayMatrix));
+    drawState.painter->setTransform(toQTransform(displayMatrix));
 
-      setBBoxPenBrush(drawState.painter);
+    setBBoxPenBrush(drawState.painter);
 
-      drawState.painter->drawRect(toQRect(shape->bbox()));
-    }
+    drawState.painter->drawRect(toQRect(shape->bbox()));
   }
 
   //---
@@ -1543,10 +1552,10 @@ CQLottie::
 pathToBezier(const CLottie::BezierProperty &path, const DrawState &drawState,
              CBezierPath &bezierPath) const
 {
-  const auto &points  = path.tvvalue(drawState.timeFrame, CLottie::PointList()).points;
-  const auto &ipoints = path.tivalue(drawState.timeFrame, CLottie::PointList()).points;
-  const auto &opoints = path.tovalue(drawState.timeFrame, CLottie::PointList()).points;
-  auto        closed  = path.tclosed(drawState.timeFrame);
+  auto points  = path.tvvalue(drawState.timeFrame, CLottie::PointList())->points;
+  auto ipoints = path.tivalue(drawState.timeFrame, CLottie::PointList())->points;
+  auto opoints = path.tovalue(drawState.timeFrame, CLottie::PointList())->points;
+  auto closed  = path.tclosed(drawState.timeFrame);
 
   //---
 
@@ -1771,12 +1780,50 @@ setBBoxPenBrush(QPainter *painter)
 
 void
 CQLottie::
+mousePress(const QPoint &pos)
+{
+  CPoint2D p;
+  displayRange_.pixelToWindow(CPoint2D(pos.x(), pos.y()), p);
+
+  CLottieObject *insideObject = nullptr;
+
+  for (auto *shape : lottie_->shapes()) {
+    const auto &bbox = shape->bbox();
+
+    if (! bbox.inside(p))
+      continue;
+
+    if (insideObject) {
+      if (shape->bbox().area() < insideObject->bbox().area())
+        insideObject = shape;
+    }
+    else
+      insideObject = shape;
+  }
+
+  if (insideObject) {
+//  std::cerr << insideObject->name().value_or("") << "\n";
+
+    lottie_->deselectAll();
+
+    insideObject->setSelected(true);
+
+    tree_->selectObject(insideObject);
+
+//  objectTree()->setObject(insideObject);
+
+    canvas()->invalidate();
+  }
+}
+
+void
+CQLottie::
 mouseMove(const QPoint &pos)
 {
   CPoint2D p;
   displayRange_.pixelToWindow(CPoint2D(pos.x(), pos.y()), p);
 
-  statusLabel_->setText(QString("%1 %2").arg(p.x).arg(p.y));
+  status_->setStatusLabel(QString("%1 %2").arg(p.x).arg(p.y));
 }
 
 //---
@@ -2078,88 +2125,18 @@ zoomFull()
   displayRange_.reset();
 }
 
-//---
-
-CQLottieCanvas::
-CQLottieCanvas(CQLottie *lottie) :
- lottie_(lottie)
+bool
+CQLottie::
+isShowTimeLine() const
 {
-  setFocusPolicy(Qt::StrongFocus);
-
-  setMouseTracking(true);
+  return timeLine_->isVisible();
 }
 
 void
-CQLottieCanvas::
-invalidate()
+CQLottie::
+setShowTimeLine(bool b)
 {
-  needsUpdate_ = true;
-
-  update();
-}
-
-void
-CQLottieCanvas::
-resizeEvent(QResizeEvent *)
-{
-  lottie_->setPixelSize(width(), height());
-
-  needsUpdate_ = true;
-}
-
-void
-CQLottieCanvas::
-paintEvent(QPaintEvent *)
-{
-  QPainter painter(this);
-
-  painter.setRenderHint(QPainter::Antialiasing);
-
-  painter.fillRect(rect(), lottie_->bgColor());
-
-  lottie_->draw(&painter, needsUpdate_);
-
-  needsUpdate_ = false;
-}
-
-void
-CQLottieCanvas::
-mouseMoveEvent(QMouseEvent *me)
-{
-  auto pos = me->pos();
-
-  lottie_->mouseMove(pos);
-}
-
-void
-CQLottieCanvas::
-keyPressEvent(QKeyEvent *ke)
-{
-  auto key = ke->key();
-
-  if      (key == Qt::Key_Plus) {
-    lottie_->zoom(true);
-  }
-  else if (key == Qt::Key_Minus) {
-    lottie_->zoom(false);
-  }
-  else if (key == Qt::Key_Left) {
-    lottie_->scroll(-1, 0);
-  }
-  else if (key == Qt::Key_Right) {
-    lottie_->scroll(1, 0);
-  }
-  else if (key == Qt::Key_Up) {
-    lottie_->scroll(0, 1);
-  }
-  else if (key == Qt::Key_Down) {
-    lottie_->scroll(0, -1);
-  }
-  else if (key == Qt::Key_Home) {
-    lottie_->zoomFull();
-  }
-
-  invalidate();
+  return timeLine_->setVisible(b);
 }
 
 //---
@@ -2209,196 +2186,4 @@ CQLottieLayer::
 clear()
 {
   image_.fill(0);
-}
-
-//---
-
-CQLottieToolBar::
-CQLottieToolBar(CQLottie *lottie) :
- lottie_(lottie)
-{
-  auto addToolButton = [&](const QString &name, const QString &iconName,
-                           const QString &tip, const char *slotName) {
-    auto *button = new CQIconButton;
-
-    button->setObjectName(name);
-    button->setIcon(iconName);
-    button->setIconSize(QSize(32, 32));
-    button->setAutoRaise(true);
-    button->setToolTip(tip);
-
-    connect(button, SIGNAL(clicked()), this, slotName);
-
-    return button;
-  };
-
-  //---
-
-  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-
-  auto *tlayout = new QHBoxLayout(this);
-
-  auto *playButton  = addToolButton("play" , "PLAY"    , "Play" , SLOT(playSlot()));
-  auto *pauseButton = addToolButton("pause", "PAUSE"   , "Pause", SLOT(pauseSlot()));
-  auto *stepButton  = addToolButton("step" , "PLAY_ONE", "Step" , SLOT(stepSlot()));
-
-  tlayout->addWidget(playButton);
-  tlayout->addWidget(pauseButton);
-  tlayout->addWidget(stepButton);
-
-  auto *loadButton = new QPushButton("Load");
-
-  connect(loadButton, SIGNAL(clicked()), this, SLOT(loadSlot()));
-
-  tlayout->addStretch(1);
-  tlayout->addWidget(loadButton);
-}
-
-void
-CQLottieToolBar::
-playSlot()
-{
-  lottie_->playSlot();
-}
-
-void
-CQLottieToolBar::
-pauseSlot()
-{
-  lottie_->pauseSlot();
-}
-
-void
-CQLottieToolBar::
-stepSlot()
-{
-  lottie_->stepSlot();
-}
-
-void
-CQLottieToolBar::
-loadSlot()
-{
-  lottie_->loadSlot();
-}
-
-//---
-
-CQLottieSettings::
-CQLottieSettings(CQLottie *lottie) :
- lottie_(lottie)
-{
-  std::vector<QLabel *> labels;
-
-  setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-
-  auto *layout = new QVBoxLayout(this);
-  layout->setMargin(0); layout->setSpacing(0);
-
-  auto addLabelEdit = [&](const QString &label, auto *w) {
-    auto *frame   = new QFrame;
-    auto *layout1 = new QHBoxLayout(frame);
-
-    auto *labelW = new QLabel(label);
-
-    labels.push_back(labelW);
-
-    layout1->addWidget(labelW);
-    layout1->addWidget(w);
-
-    layout->addWidget(frame);
-
-    return w;
-  };
-
-  bgFillEdit_       = addLabelEdit("Bg Fill"      , new CQColorEdit(this));
-  selectFillEdit_   = addLabelEdit("Select Fill"  , new CQColorEdit(this));
-  selectStrokeEdit_ = addLabelEdit("Select Stroke", new CQColorEdit(this));
-  bboxStrokeEdit_   = addLabelEdit("BBox Stroke"  , new CQColorEdit(this));
-
-  auto alignLabels = [&]() {
-    QFontMetrics fm(font());
-
-    int lw = 0;
-
-    for (auto *label : labels)
-      lw = std::max(lw, label->sizeHint().width());
-
-    for (auto *label : labels)
-      label->setFixedWidth(lw);
-  };
-
-  layout->addStretch(1);
-
-  alignLabels();
-
-  //---
-
-  connectSlots(true);
-
-  updateWidgets();
-}
-
-void
-CQLottieSettings::
-connectSlots(bool b)
-{
-  CQUtil::connectDisconnect(b, bgFillEdit_, SIGNAL(colorChanged(const QColor &)),
-                            this, SLOT(bgFillSlot(const QColor &)));
-  CQUtil::connectDisconnect(b, selectFillEdit_, SIGNAL(colorChanged(const QColor &)),
-                            this, SLOT(selectedFillSlot(const QColor &)));
-  CQUtil::connectDisconnect(b, selectStrokeEdit_, SIGNAL(colorChanged(const QColor &)),
-                            this, SLOT(selectedStrokeSlot(const QColor &)));
-  CQUtil::connectDisconnect(b, bboxStrokeEdit_, SIGNAL(colorChanged(const QColor &)),
-                            this, SLOT(bboxStrokeSlot(const QColor &)));
-}
-
-void
-CQLottieSettings::
-updateWidgets()
-{
-  connectSlots(false);
-
-  bgFillEdit_      ->setColor(lottie_->bgColor());
-  selectFillEdit_  ->setColor(lottie_->selectedBrushColor());
-  selectStrokeEdit_->setColor(lottie_->selectedPenColor());
-  bboxStrokeEdit_  ->setColor(lottie_->bboxPenColor());
-
-  connectSlots(true);
-}
-
-void
-CQLottieSettings::
-bgFillSlot(const QColor &c)
-{
-  lottie_->setBgColor(c);
-
-  lottie_->updateAll();
-}
-
-void
-CQLottieSettings::
-selectedFillSlot(const QColor &c)
-{
-  lottie_->setSelectedBrushColor(c);
-
-  lottie_->updateAll();
-}
-
-void
-CQLottieSettings::
-selectedStrokeSlot(const QColor &c)
-{
-  lottie_->setSelectedPenColor(c);
-
-  lottie_->updateAll();
-}
-
-void
-CQLottieSettings::
-bboxStrokeSlot(const QColor &c)
-{
-  lottie_->setBBoxPenColor(c);
-
-  lottie_->updateAll();
 }

@@ -25,6 +25,8 @@ class CQLottieTree : public QFrame {
 
   void load();
 
+  void selectObject(CLottieObject *object);
+
   QSize sizeHint() const override { return QSize(600, 1600); }
 
   QTreeWidgetItem *itemFromIndex(const QModelIndex &index) const;
@@ -59,17 +61,17 @@ class CQLottieTree : public QFrame {
   CQLottie*           lottie_ { nullptr };
   CQLottieTreeWidget* tree_   { nullptr };
 
-  using AssetItem  = std::map<CLottieAsset  *, QTreeWidgetItem *>;
-  using LayerItem  = std::map<CLottieLayer  *, QTreeWidgetItem *>;
-  using ShapeItem  = std::map<CLottieShape  *, QTreeWidgetItem *>;
-  using EffectItem = std::map<CLottieEffect *, QTreeWidgetItem *>;
+  using AssetItemMap  = std::map<CLottieAsset  *, QTreeWidgetItem *>;
+  using LayerItemMap  = std::map<CLottieLayer  *, QTreeWidgetItem *>;
+  using ShapeItemMap  = std::map<CLottieShape  *, QTreeWidgetItem *>;
+  using EffectItemMap = std::map<CLottieEffect *, QTreeWidgetItem *>;
 
   QTreeWidgetItem *rootItem_ { nullptr };
 
-  AssetItem  assetItem_;
-  LayerItem  layerItem_;
-  ShapeItem  shapeItem_;
-  EffectItem effectItem_;
+  AssetItemMap  assetItemMap_;
+  LayerItemMap  layerItemMap_;
+  ShapeItemMap  shapeItemMap_;
+  EffectItemMap effectItemMap_;
 };
 
 //---
@@ -189,6 +191,7 @@ class CQLottieTreeValueItem : public QTreeWidgetItem {
     INTEGER,
     REAL,
     STRING,
+    RGBA,
     COLOR,
     SPLIT_POSITION,
     POSITION,
@@ -208,11 +211,16 @@ class CQLottieTreeValueItem : public QTreeWidgetItem {
 
   CLottieObject *object() const { return object_; }
 
+  const CLottieProperty *property() const { return property_; }
+  void setProperty(CLottieProperty *p) { property_ = p; }
+
  protected:
   CLottieObject* object_ { nullptr };
 
   QString propName_;
   Type    propType_ { Type::NONE };
+
+  CLottieProperty *property_ { nullptr };
 };
 
 class CQLottieTreeRootValueItem : public CQLottieTreeValueItem {
@@ -305,6 +313,7 @@ class CQLottieObjectTree : public QFrame {
   void collapseAll(const QModelIndex &ind=QModelIndex());
 
   void printSlot();
+  void printAllSlot();
 
  private:
   CQLottie*                 lottie_ { nullptr };
@@ -319,6 +328,8 @@ class CQLottieObjectTreeWidget : public QTreeWidget {
 
  public:
   CQLottieObjectTreeWidget(CQLottieObjectTree *tree);
+
+  void selectObject(CLottieObject *object);
 
   QModelIndex indexFromItem(const QTreeWidgetItem *item, int column=0) const {
     return QTreeWidget::indexFromItem(item, column);

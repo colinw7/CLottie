@@ -10,7 +10,9 @@
 
 class CQLottieCanvas;
 class CQLottieToolBar;
+class CQLottieStatusBar;
 class CQLottieSettings;
+class CQLottieTimeLine;
 class CQLottieTree;
 class CQLottieLayer;
 class CQLottieObjectTree;
@@ -32,15 +34,44 @@ class CQLottie : public QWidget {
 
   CQLottieCanvas *canvas() const { return canvas_; }
 
+  CQLottieStatusBar *status() const { return status_; }
+
+  CQLottieTimeLine *timeLine() const { return timeLine_; }
+
   CQLottieTree *tree() const { return tree_; }
 
   CQLottieObjectTree *objectTree() const { return objectTree_; }
+
+  //---
 
   void setDebug(bool b);
   void setPrint(bool b);
 
   bool isDoubleBuffer() const { return doubleBuffer_; }
   void setDoubleBuffer(bool b) { doubleBuffer_ = b; }
+
+  bool isEqualScale() const { return equalScale_; }
+  void setEqualScale(bool b);
+
+  const QColor &bgColor() const { return bgColor_; }
+  void setBgColor(const QColor &c) { bgColor_ = c; }
+
+  bool isShowSelect() const { return showSelect_; }
+  void setShowSelect(bool b) { showSelect_ = b; }
+
+  const QColor &selectedPenColor() const { return selectedPenColor_; }
+  void setSelectedPenColor(const QColor &c) { selectedPenColor_ = c; }
+
+  const QColor &selectedBrushColor() const { return selectedBrushColor_; }
+  void setSelectedBrushColor(const QColor &c) { selectedBrushColor_ = c; }
+
+  bool isShowBBox() const { return showBBox_; }
+  void setShowBBox(bool b) { showBBox_ = b; }
+
+  const QColor &bboxPenColor() const { return bboxPenColor_; }
+  void setBBoxPenColor(const QColor &c) { bboxPenColor_ = c; }
+
+  //---
 
   bool load(const std::string &filename);
 
@@ -52,23 +83,17 @@ class CQLottie : public QWidget {
   void scroll(double dx, double dy);
   void zoomFull();
 
+  void mousePress(const QPoint &pos);
   void mouseMove(const QPoint &pos);
 
   void getTimeFrame(CLottieUtil::TimeFrame &timeFrame) const;
 
-  const QColor &bgColor() const { return bgColor_; }
-  void setBgColor(const QColor &c) { bgColor_ = c; }
-
-  const QColor &selectedPenColor() const { return selectedPenColor_; }
-  void setSelectedPenColor(const QColor &c) { selectedPenColor_ = c; }
-
-  const QColor &selectedBrushColor() const { return selectedBrushColor_; }
-  void setSelectedBrushColor(const QColor &c) { selectedBrushColor_ = c; }
-
-  const QColor &bboxPenColor() const { return bboxPenColor_; }
-  void setBBoxPenColor(const QColor &c) { bboxPenColor_ = c; }
-
   void updateAll();
+
+  //---
+
+  bool isShowTimeLine() const;
+  void setShowTimeLine(bool b);
 
  public Q_SLOTS:
   void loadSlot();
@@ -275,9 +300,8 @@ class CQLottie : public QWidget {
   CQLottieToolBar*    toolbar_     { nullptr };
   CQLottieSettings*   settings_    { nullptr };
   CQLottieCanvas*     canvas_      { nullptr };
-  QFrame*             status_      { nullptr };
-  QLabel*             statusLabel_ { nullptr };
-  QLabel*             ticksLabel_  { nullptr };
+  CQLottieStatusBar*  status_      { nullptr };
+  CQLottieTimeLine*   timeLine_    { nullptr };
   CQLottieTree*       tree_        { nullptr };
   CQLottieObjectTree* objectTree_  { nullptr };
 
@@ -286,6 +310,7 @@ class CQLottie : public QWidget {
   CDisplayRange2D displayRange_;
 
   bool doubleBuffer_ { false };
+  bool equalScale_   { true };
 
   bool running_ { false };
 
@@ -302,35 +327,11 @@ class CQLottie : public QWidget {
   AssetImage assetImage_;
 
   QColor bgColor_            { Qt::white };
+  bool   showSelect_         { true };
   QColor selectedPenColor_   { Qt::red };
   QColor selectedBrushColor_ { Qt::white };
+  bool   showBBox_           { false };
   QColor bboxPenColor_       { Qt::red };
-};
-
-//---
-
-class CQLottieCanvas : public QWidget {
-  Q_OBJECT
-
- public:
-  CQLottieCanvas(CQLottie *lottie);
-
-  void invalidate();
-
-  void resizeEvent(QResizeEvent *) override;
-
-  void paintEvent(QPaintEvent *) override;
-
-  void mouseMoveEvent(QMouseEvent *) override;
-
-  void keyPressEvent(QKeyEvent *) override;
-
-  QSize sizeHint() const override { return QSize(1600, 1600); }
-
- private:
-  CQLottie* lottie_ { nullptr };
-
-  bool needsUpdate_ { true };
 };
 
 //---
@@ -399,52 +400,6 @@ class CQLottieShape : public CLottieShape {
 
  private:
   CQLottie *lottie_ { nullptr };
-};
-
-//---
-
-class CQLottieToolBar : public QFrame {
-  Q_OBJECT
-
- public:
-  CQLottieToolBar(CQLottie *lottie);
-
- private Q_SLOTS:
-  void loadSlot();
-
-  void playSlot();
-  void pauseSlot();
-  void stepSlot();
-
- private:
-  CQLottie *lottie_ { nullptr };
-};
-
-//---
-
-class CQLottieSettings : public QFrame {
-  Q_OBJECT
-
- public:
-  CQLottieSettings(CQLottie *lottie);
-
- private Q_SLOTS:
-  void bgFillSlot(const QColor &);
-  void selectedFillSlot(const QColor &);
-  void selectedStrokeSlot(const QColor &);
-  void bboxStrokeSlot(const QColor &);
-
- private:
-  void connectSlots(bool b);
-  void updateWidgets();
-
- private:
-  CQLottie *lottie_ { nullptr };
-
-  CQColorEdit *bgFillEdit_       { nullptr };
-  CQColorEdit *selectFillEdit_   { nullptr };
-  CQColorEdit *selectStrokeEdit_ { nullptr };
-  CQColorEdit *bboxStrokeEdit_   { nullptr };
 };
 
 #endif

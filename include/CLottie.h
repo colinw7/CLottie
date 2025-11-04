@@ -8,6 +8,7 @@
 #include <CBBox2D.h>
 #include <CPoint2D.h>
 #include <CRGBA.h>
+#include <CUtil.h>
 
 #include <string>
 
@@ -40,6 +41,8 @@ struct XYVals {
     xvals.push_back(p.x);
     yvals.push_back(p.y);
   }
+
+  size_t size() const { return std::min(xvals.size(), yvals.size()); }
 
   bool isSet() const { return ! xvals.empty() && ! yvals.empty(); }
 
@@ -74,14 +77,14 @@ struct XYVals {
 };
 
 template<typename T>
-struct ValArray {
-  ValArray() { }
+struct ValArrayT {
+  ValArrayT() { }
 
-  ValArray(const std::vector<T> &a) : vals(a) { }
+  ValArrayT(const std::vector<T> &a) : vals(a) { }
 
   bool isSet() const { return ! vals.empty(); }
 
-  friend std::ostream &operator<<(std::ostream &os, const ValArray &l) {
+  friend std::ostream &operator<<(std::ostream &os, const ValArrayT &l) {
     os << "[";
     int i = 0;
     for (auto &v : l.vals) {
@@ -96,74 +99,7 @@ struct ValArray {
   std::vector<T> vals;
 };
 
-using RValArray = ValArray<double>;
-
-template<typename T>
-struct KeyFrameT {
-  using OptPoint = std::optional<CPoint2D>;
-  using OptReal  = std::optional<double>;
-
-  std::vector<XYVals> ivalues;
-  std::vector<XYVals> ovalues;
-
-  ValArray<T> startValue;
-  ValArray<T> endValue;
-
-  std::vector<std::string> interpolation;
-
-  bool hold { false };
-
-  OptPoint tangentIn;
-  OptPoint tangentOut;
-
-  OptReal timeFrame;
-
-  void print(const std::string &prefix="") const {
-    auto printValue = [&](const std::string &n, auto value) {
-      std::cout << prefix << n << "=" << value << "\n";
-    };
-
-    auto optPrintValue = [&](const std::string &n, const auto &value) {
-      if (value)
-        std::cout << prefix << n << "=" << *value << "\n";
-    };
-
-    if (! ivalues.empty()) {
-      printValue("ivalues", "");
-
-      for (auto &v : ivalues) {
-        std::cout << prefix << "  " << v << "\n";
-      }
-    }
-
-    if (! ovalues.empty()) {
-      printValue("ovalues", "");
-
-      for (auto &v : ovalues) {
-        std::cout << prefix << "  " << v << "\n";
-      }
-    }
-
-    if (! interpolation.empty()) {
-      printValue("interpolation", "");
-
-      for (auto &v : interpolation) {
-        std::cout << prefix << "  " << v << "\n";
-      }
-    }
-
-    if (startValue.isSet())
-      printValue("startValue", startValue);
-
-    if (endValue.isSet())
-      printValue("endValue", endValue);
-
-    optPrintValue("tangentIn" , tangentIn );
-    optPrintValue("tangentOut", tangentOut);
-
-    optPrintValue("timeFrame", timeFrame);
-  }
-};
+using RValArray = ValArrayT<double>;
 
 template<>
 inline XYVals mapValue<XYVals>(double t, const XYVals &v1, const XYVals &v2) {
@@ -269,16 +205,274 @@ struct CLottieEffectValue;
 
 //---
 
+class CLottieKeyFrame {
+ public:
+  using XYVals   = CLottieUtil::XYVals;
+  using OptPoint = std::optional<CPoint2D>;
+  using OptReal  = std::optional<double>;
+
+ public:
+  CLottieKeyFrame() { }
+
+  virtual ~CLottieKeyFrame() { }
+
+  //----
+
+  const std::vector<XYVals> &ivalues() const { return ivalues_; }
+  const std::vector<XYVals> &ovalues() const { return ovalues_; }
+
+  const OptReal &timeFrame() const { return timeFrame_; }
+  void setTimeFrame(const OptReal &v) { timeFrame_ = v; }
+
+  bool isHold() const { return hold_; }
+  void setHold(bool b) { hold_ = b; }
+
+  //----
+
+  virtual void print(const std::string &prefix="") const {
+    auto printValue = [&](const std::string &n, auto value) {
+      std::cout << prefix << n << "=" << value << "\n";
+    };
+
+    auto optPrintValue = [&](const std::string &n, const auto &value) {
+      if (value)
+        std::cout << prefix << n << "=" << *value << "\n";
+    };
+
+    if (! ivalues_.empty()) {
+      printValue("ivalues", "");
+
+      for (auto &v : ivalues_) {
+        std::cout << prefix << "  " << v << "\n";
+      }
+    }
+
+    if (! ovalues_.empty()) {
+      printValue("ovalues", "");
+
+      for (auto &v : ovalues_) {
+        std::cout << prefix << "  " << v << "\n";
+      }
+    }
+
+    if (! interpolation_.empty()) {
+      printValue("interpolation", "");
+
+      for (auto &v : interpolation_) {
+        std::cout << prefix << "  " << v << "\n";
+      }
+    }
+
+    optPrintValue("tangentIn" , tangentIn_ );
+    optPrintValue("tangentOut", tangentOut_);
+
+    optPrintValue("timeFrame", timeFrame_);
+
+    printValue("hold", hold_);
+  }
+
+ public:
+  std::vector<std::string> interpolation_;
+
+  std::vector<XYVals> ivalues_;
+  std::vector<XYVals> ovalues_;
+
+  OptPoint tangentIn_;
+  OptPoint tangentOut_;
+
+  OptReal timeFrame_;
+
+  bool hold_ { false };
+};
+
+//----
+
+class CLottieProperty {
+ public:
+  enum class Type {
+    NONE,
+    SCALAR,
+    COLOR,
+    ARRAY,
+    VECTOR,
+    POSITION,
+    SPLIT_POSITION,
+    BEZIER,
+    SIZE
+  };
+
+  using TimeFrame = CLottieUtil::TimeFrame;
+  using OptInt    = std::optional<int>;
+  using OptReal   = std::optional<double>;
+  using OptStr    = std::optional<std::string>;
+  using OptBool   = std::optional<bool>;
+
+  enum class FramePos {
+    NONE,
+    BEFORE,
+    INSIDE,
+    AFTER
+  };
+
+  struct FrameInd {
+    FramePos pos { FramePos::NONE };
+    int      ind { -1 };
+  };
+
+ public:
+  static const char *typeName(const Type &type) {
+    switch (type) {
+      case Type::SCALAR        : return "Scalar";
+      case Type::COLOR         : return "Color";
+      case Type::ARRAY         : return "Array";
+      case Type::VECTOR        : return "Vector";
+      case Type::POSITION      : return "Position";
+      case Type::SPLIT_POSITION: return "Split Position";
+      case Type::BEZIER        : return "Bezier";
+      case Type::SIZE          : return "Size";
+      case Type::NONE          :
+      default                  : return "<none>";
+    }
+  }
+
+  CLottieProperty(const Type &t) :
+   type_(t) {
+  }
+
+  virtual ~CLottieProperty() { }
+
+  //---
+
+  const Type &type() const { return type_; }
+
+  bool isAnimatedSet() const { return !!animated_; }
+
+  bool isAnimated() const { return animated_.value_or(false); }
+  void setAnimated(bool b) { animated_ = b; }
+
+  const OptInt &index() const { return index_; }
+  void setIndex(const OptInt &v) { index_ = v; }
+
+  const OptStr &expression() const { return expression_; }
+  void setExpression(const OptStr &v) { expression_ = v; }
+
+  //---
+
+  virtual bool isSet() const = 0;
+
+  virtual bool isTSet() const { return (numKeyFrames() > 0); }
+
+  virtual size_t numKeyFrames() const = 0;
+
+  virtual CLottieKeyFrame *keyFrame(uint i) const = 0;
+
+  //---
+
+  virtual std::string tvalueStr(const TimeFrame &frame) const = 0;
+
+  //---
+
+  virtual FrameInd calcFrameInd(const TimeFrame &frame) const {
+    FrameInd frameInd;
+
+    auto nf = uint(numKeyFrames());
+
+    if (nf == 0)
+      return frameInd;
+
+    frameInd.pos = FramePos::BEFORE;
+    frameInd.ind = 0;
+
+    for (uint i = 0; i < nf; ++i) {
+      auto *keyFrame1 = keyFrame(i);
+      auto *keyFrame2 = (i < nf - 1 ? keyFrame(i + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+
+      OptReal frameStop;
+
+      if (keyFrame2)
+        frameStop = keyFrame2->timeFrame_.value_or(0.0);
+
+      if (frame.frame >= frameStart && frameStop && frame.frame < frameStop.value()) {
+        frameInd.pos = FramePos::INSIDE;
+        frameInd.ind = int(i);
+        break;
+      }
+
+      if (frameStop && frame.frame >= frameStop.value()) {
+        frameInd.pos = FramePos::AFTER;
+        frameInd.ind = int(i);
+      }
+    }
+
+    assert(frameInd.ind >= 0 && frameInd.ind <= int(nf - 1));
+
+    return frameInd;
+  }
+
+  //---
+
+  virtual void print(const std::string &prefix="") const {
+    optPrintValue(prefix, "animated", animated_);
+
+    optPrintValue(prefix, "index", index_);
+
+    optPrintValue(prefix, "expression", expression_);
+  }
+
+ protected:
+  template<typename T>
+  void optPrintValue(const std::string &prefix, const std::string &n,
+                     const std::optional<T> &value) const {
+    if (value)
+      std::cout << prefix << n << "=" << *value << "\n";
+  }
+
+ protected:
+  Type    type_;
+  OptBool animated_;
+  OptInt  index_;
+  OptStr  expression_;
+};
+
+//---
+
+template<typename T>
+class CLottieKeyFrameT : public CLottieKeyFrame {
+ public:
+  using ValArray = CLottieUtil::ValArrayT<T>;
+
+  ValArray startValue;
+  ValArray endValue;
+
+  void print(const std::string &prefix="") const override {
+    CLottieKeyFrame::print(prefix);
+
+    auto printValue = [&](const std::string &n, auto value) {
+      std::cout << prefix << n << "=" << value << "\n";
+    };
+
+    if (startValue.isSet())
+      printValue("startValue", startValue);
+
+    if (endValue.isSet())
+      printValue("endValue", endValue);
+  }
+};
+
+//---
+
 class CLottie {
  public:
   using TimeFrame = CLottieUtil::TimeFrame;
 
   using Points   = std::vector<CPoint2D>;
   using Colors   = std::vector<CRGBA>;
-  using OptBool  = std::optional<bool>;
   using OptInt   = std::optional<int>;
   using OptReal  = std::optional<double>;
   using OptStr   = std::optional<std::string>;
+  using OptBool  = std::optional<bool>;
   using OptPoint = std::optional<CPoint2D>;
   using OptColor = std::optional<CRGBA>;
 
@@ -309,44 +503,37 @@ class CLottie {
     std::vector<double> vals;
   };
 
-  struct Property {
-    OptBool animated;
-    OptInt  index;
-    OptStr  expression;
-
-    void print(const std::string &prefix="") const {
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
-      };
-
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
-
-      optPrintValue("expression", expression);
-    }
-  };
-
   using XYVals = CLottieUtil::XYVals;
 
   template<typename T>
-  struct PropertyT : Property {
-    using KeyFrame = CLottieUtil::KeyFrameT<T>;
+  class PropertyT : public CLottieProperty {
+   public:
+    using KeyFrame = CLottieKeyFrameT<T>;
     using OptVal   = std::optional<T>;
 
-    std::vector<T>        values;
-    std::vector<KeyFrame> keyFrames;
+   public:
+    PropertyT(const Type &t) :
+     CLottieProperty(t) {
+    }
 
-    bool isSet() const {
+   ~PropertyT() override {
+      for (auto *keyFrame : keyFrames)
+        delete keyFrame;
+    }
+
+    bool isSet() const override {
       return (! values.empty() || ! keyFrames.empty());
     }
 
-    bool isTSet() const {
-      return ! keyFrames.empty();
-    }
+    //---
 
-    void print(const std::string &prefix="") const {
+    size_t numKeyFrames() const override { return keyFrames.size(); }
+
+    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+
+    //---
+
+    void print(const std::string &prefix="") const override {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
       };
@@ -358,7 +545,7 @@ class CLottie {
       };
 #endif
 
-      Property::print(prefix);
+      CLottieProperty::print(prefix);
 
       if (! values.empty()) {
         printValue("values", "");
@@ -373,15 +560,25 @@ class CLottie {
 
         int i = 0;
 
-        for (const auto &kf : keyFrames) {
+        for (auto *kf : keyFrames) {
           std::cout << prefix << " Frame [" << i << "]\n";
 
-          kf.print(prefix + "  ");
+          kf->print(prefix + "  ");
 
           ++i;
         }
       }
     }
+
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto value = tvalue(frame);
+      if (! value) return "<none>";
+      return CUtil::toString(*value);
+    }
+
+    //---
 
     OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
@@ -391,7 +588,7 @@ class CLottie {
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (animated.value_or(false)) {
+      if (isAnimated()) {
         if (! isTSet())
           return def;
 
@@ -402,63 +599,55 @@ class CLottie {
     }
 
     OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
-      if (keyFrames.empty())
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
+
+      auto nf = keyFrames.size();
+
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
         return def;
 
-      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
-        OptVal v1, v2;
+      OptVal v1, v2;
 
-        if (! keyFrames[0].startValue.vals.empty())
-          v1 = keyFrames[0].startValue.vals[0];
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
 
-        if (! keyFrames[0].endValue.vals.empty())
-          v2 = keyFrames[0].endValue.vals[0];
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
 
+      if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = frame.mapFrame();
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
         else if (v1)
           return v1;
-        else
+        else if (v2)
           return v2;
       }
-
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
-
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
-
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
-
-          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
-            return def;
-
-          OptVal v1, v2;
-
-          if (! keyFrames[i].startValue.vals.empty())
-            v1 = keyFrames[i].startValue.vals[0];
-
-          if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue.vals[0];
-
-          if (v1 && v2) {
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
-
-            return CLottieUtil::mapValue(dt, *v1, *v2);
-          }
-          else if (v1)
-            return v1;
-          else
-            return v2;
-        }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
       }
 
       return def;
@@ -470,322 +659,209 @@ class CLottie {
       else
         values[0] = v;
     }
+
+   public:
+    std::vector<T>          values;
+    std::vector<KeyFrame *> keyFrames;
   };
 
-  struct SplitPositionProperty : Property {
-    using KeyFrame = CLottieUtil::KeyFrameT<CPoint2D>;
+  //---
+
+  class ScalarProperty : public PropertyT<double> {
+   public:
+    ScalarProperty() :
+     PropertyT(Type::SCALAR) {
+    }
+  };
+
+  //---
+
+  class SplitPositionProperty : public CLottieProperty {
+   public:
+    using KeyFrame = CLottieKeyFrameT<CPoint2D>;
     using OptVal   = std::optional<CPoint2D>;
 
-    using ScalarProperty = PropertyT<double>;
+   public:
+    SplitPositionProperty() :
+     CLottieProperty(Type::SPLIT_POSITION) {
+    }
 
-    std::vector<CPoint2D> values;
-    std::vector<KeyFrame> keyFrames;
+   ~SplitPositionProperty() override {
+      for (auto *keyFrame : keyFrames)
+        delete keyFrame;
+    }
+
+    bool isSet() const override {
+      return (! values.empty() || ! keyFrames.empty());
+    }
+
+    //---
+
+    size_t numKeyFrames() const override { return keyFrames.size(); }
+
+    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+
+    //---
+
+    void print(const std::string &prefix="") const override {
+      auto printValue = [&](const std::string &n, auto value) {
+        std::cout << prefix << n << "=" << value << "\n";
+      };
+
+      CLottieProperty::print(prefix);
+
+      if (! values.empty()) {
+        printValue("values", "");
+
+        for (auto &v : values) {
+          std::cout << prefix << "  " << v << "\n";
+        }
+      }
+
+      if (! keyFrames.empty()) {
+        printValue("KeyFrames", "");
+
+        int i = 0;
+
+        for (auto *kf : keyFrames) {
+          std::cout << prefix << " Frame [" << i << "]\n";
+
+          kf->print(prefix + "  ");
+
+          ++i;
+        }
+      }
+    }
+
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto value = tvalue(frame);
+      if (! value) return "<none>";
+      return CUtil::toString(*value);
+    }
+
+    //---
+
+    OptVal value(const OptVal &def=OptVal()) const {
+      if (values.empty())
+        return def;
+
+      return values[0];
+    }
+
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (isAnimated()) {
+        if (! isTSet())
+          return def;
+
+        return keyFrameValue(frame, def);
+      }
+      else
+        return value(def);
+    }
+
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
+
+      auto nf = keyFrames.size();
+
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
+        return def;
+
+      OptVal v1, v2;
+
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
+
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
+
+      if (frameInd.pos == FramePos::INSIDE) {
+        if (v1 && v2) {
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else if (v2)
+          return v2;
+      }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
+      }
+
+      return def;
+    }
+
+   public:
+    std::vector<CPoint2D>   values;
+    std::vector<KeyFrame *> keyFrames;
 
     OptBool        split;
     ScalarProperty x;
     ScalarProperty y;
 
     OptInt length;
-
-    //---
-
-    bool isSet() const {
-      return (! values.empty() || ! keyFrames.empty());
-    }
-
-    bool isTSet() const {
-      return ! keyFrames.empty();
-    }
-
-    void print(const std::string &prefix="") const {
-      auto printValue = [&](const std::string &n, auto value) {
-        std::cout << prefix << n << "=" << value << "\n";
-      };
-
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
-      };
-
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
-
-      if (! values.empty()) {
-        printValue("values", "");
-
-        for (auto &v : values) {
-          std::cout << prefix << "  " << v << "\n";
-        }
-      }
-
-      if (! keyFrames.empty()) {
-        printValue("KeyFrames", "");
-
-        int i = 0;
-
-        for (const auto &kf : keyFrames) {
-          std::cout << prefix << " Frame [" << i << "]\n";
-
-          kf.print(prefix + "  ");
-
-          ++i;
-        }
-      }
-    }
-
-    OptVal value(const OptVal &def=OptVal()) const {
-      if (values.empty())
-        return def;
-
-      return values[0];
-    }
-
-    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (animated.value_or(false)) {
-        if (! isTSet())
-          return def;
-
-        return keyFrameValue(frame, def);
-      }
-      else
-        return value(def);
-    }
-
-    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
-      if (keyFrames.empty())
-        return def;
-
-      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
-        OptVal v1, v2;
-
-        if (! keyFrames[0].startValue.vals.empty())
-          v1 = keyFrames[0].startValue.vals[0];
-
-        if (! keyFrames[0].endValue.vals.empty())
-          v2 = keyFrames[0].endValue.vals[0];
-
-        if (v1 && v2) {
-          auto dt = frame.mapFrame();
-
-          return CLottieUtil::mapValue(dt, *v1, *v2);
-        }
-        else if (v1)
-          return v1;
-        else
-          return v2;
-      }
-
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
-
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
-
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
-
-          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
-            return def;
-
-          OptVal v1, v2;
-
-          if (! keyFrames[i].startValue.vals.empty())
-            v1 = keyFrames[i].startValue.vals[0];
-
-          if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue.vals[0];
-
-          if (v1 && v2) {
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
-
-            return CLottieUtil::mapValue(dt, *v1, *v2);
-          }
-          else if (v1)
-            return v1;
-          else
-            return v2;
-        }
-      }
-
-      return def;
-    }
   };
 
-  struct VectorProperty : Property {
-    using KeyFrame = CLottieUtil::KeyFrameT<CPoint2D>;
+  class VectorProperty : public CLottieProperty {
+   public:
+    using KeyFrame = CLottieKeyFrameT<CPoint2D>;
     using OptVal   = std::optional<CPoint2D>;
 
-    std::vector<CPoint2D> values;
-    std::vector<KeyFrame> keyFrames;
+    //---
 
-    OptInt length;
+   public:
+    VectorProperty() :
+     CLottieProperty(Type::VECTOR) {
+    }
+
+   ~VectorProperty() override {
+      for (auto *keyFrame : keyFrames)
+        delete keyFrame;
+    }
+
+    bool isSet() const override {
+      return (! values.empty() || ! keyFrames.empty());
+    }
 
     //---
 
-    bool isSet() const {
-      return (! values.empty() || ! keyFrames.empty());
-    }
+    size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    bool isTSet() const {
-      return ! keyFrames.empty();
-    }
-
-    void print(const std::string &prefix="") const {
-      auto printValue = [&](const std::string &n, auto value) {
-        std::cout << prefix << n << "=" << value << "\n";
-      };
-
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
-      };
-
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
-
-      if (! values.empty()) {
-        printValue("values", "");
-
-        for (auto &v : values) {
-          std::cout << prefix << "  " << v << "\n";
-        }
-      }
-
-      if (! keyFrames.empty()) {
-        printValue("KeyFrames", "");
-
-        int i = 0;
-
-        for (const auto &kf : keyFrames) {
-          std::cout << prefix << " Frame [" << i << "]\n";
-
-          kf.print(prefix + "  ");
-
-          ++i;
-        }
-      }
-    }
-
-    OptVal value(const OptVal &def=OptVal()) const {
-      if (values.empty())
-        return def;
-
-      return values[0];
-    }
-
-    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (animated.value_or(false)) {
-        if (! isTSet())
-          return def;
-
-        return keyFrameValue(frame, def);
-      }
-      else
-        return value(def);
-    }
-
-    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
-      if (keyFrames.empty())
-        return def;
-
-      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
-        OptVal v1, v2;
-
-        if (! keyFrames[0].startValue.vals.empty())
-          v1 = keyFrames[0].startValue.vals[0];
-
-        if (! keyFrames[0].endValue.vals.empty())
-          v2 = keyFrames[0].endValue.vals[0];
-
-        if (v1 && v2) {
-          auto dt = frame.mapFrame();
-
-          return CLottieUtil::mapValue(dt, *v1, *v2);
-        }
-        else if (v1)
-          return v1;
-        else
-          return v2;
-      }
-
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
-
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
-
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
-
-          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
-            return def;
-
-          OptVal v1, v2;
-
-          if (! keyFrames[i].startValue.vals.empty())
-            v1 = keyFrames[i].startValue.vals[0];
-
-          if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue.vals[0];
-
-          if (v1 && v2) {
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
-
-            return CLottieUtil::mapValue(dt, *v1, *v2);
-          }
-          else if (v1)
-            return v1;
-          else
-            return v2;
-        }
-      }
-
-      return def;
-    }
-  };
-
-  struct PositionProperty : Property {
-    using KeyFrame = CLottieUtil::KeyFrameT<XYVals>;
-    using OptVal   = std::optional<XYVals>;
-
-    std::vector<XYVals>   values;
-    std::vector<KeyFrame> keyFrames;
-
-    OptInt length;
+    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
-    bool isSet() const {
-      return (! values.empty() || ! keyFrames.empty());
-    }
-
-    bool isTSet() const {
-      return ! keyFrames.empty();
-    }
-
-    void print(const std::string &prefix="") const {
+    void print(const std::string &prefix="") const override {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
       };
 
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
-      };
-
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
+      CLottieProperty::print(prefix);
 
       if (! values.empty()) {
         printValue("values", "");
@@ -800,15 +876,25 @@ class CLottie {
 
         int i = 0;
 
-        for (const auto &kf : keyFrames) {
+        for (auto *kf : keyFrames) {
           std::cout << prefix << " Frame [" << i << "]\n";
 
-          kf.print(prefix + "  ");
+          kf->print(prefix + "  ");
 
           ++i;
         }
       }
     }
+
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto value = tvalue(frame);
+      if (! value) return "<none>";
+      return CUtil::toString(*value);
+    }
+
+    //---
 
     OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
@@ -818,7 +904,7 @@ class CLottie {
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (animated.value_or(false)) {
+      if (isAnimated()) {
         if (! isTSet())
           return def;
 
@@ -829,97 +915,102 @@ class CLottie {
     }
 
     OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
-      if (keyFrames.empty())
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
+
+      auto nf = keyFrames.size();
+
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
         return def;
 
-      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
-        OptVal v1, v2;
+      OptVal v1, v2;
 
-        if (! keyFrames[0].startValue.vals.empty())
-          v1 = keyFrames[0].startValue.vals[0];
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
 
-        if (! keyFrames[0].endValue.vals.empty())
-          v2 = keyFrames[0].endValue.vals[0];
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
 
+      if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = frame.mapFrame();
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
         else if (v1)
           return v1;
-        else
+        else if (v2)
           return v2;
       }
-
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
-
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
-
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
-
-          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
-            return def;
-
-          OptVal v1, v2;
-
-          if (! keyFrames[i].startValue.vals.empty())
-            v1 = keyFrames[i].startValue.vals[0];
-
-          if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue.vals[0];
-
-          if (v1 && v2) {
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
-
-            return CLottieUtil::mapValue(dt, *v1, *v2);
-          }
-          else if (v1)
-            return v1;
-          else
-            return v2;
-        }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
       }
 
       return def;
     }
+
+   public:
+    std::vector<CPoint2D>   values;
+    std::vector<KeyFrame *> keyFrames;
+
+    OptInt length;
   };
 
-  struct SizeProperty : Property {
-    using KeyFrame = CLottieUtil::KeyFrameT<XYVals>;
+  //---
+
+  class PositionProperty : public CLottieProperty {
+   public:
+    using KeyFrame = CLottieKeyFrameT<XYVals>;
     using OptVal   = std::optional<XYVals>;
 
-    std::vector<XYVals>   values;
-    std::vector<KeyFrame> keyFrames;
+   public:
+    PositionProperty() :
+     CLottieProperty(Type::POSITION) {
+    }
 
-    bool isSet() const {
+   ~PositionProperty() override {
+      for (auto *keyFrame : keyFrames)
+        delete keyFrame;
+    }
+
+    bool isSet() const override {
       return (! values.empty() || ! keyFrames.empty());
     }
 
-    bool isTSet() const {
-      return ! keyFrames.empty();
-    }
+    //---
 
-    void print(const std::string &prefix="") const {
+    size_t numKeyFrames() const override { return keyFrames.size(); }
+
+    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+
+    //---
+
+    void print(const std::string &prefix="") const override {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
       };
 
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
-      };
-
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
+      CLottieProperty::print(prefix);
 
       if (! values.empty()) {
         printValue("values", "");
@@ -934,15 +1025,25 @@ class CLottie {
 
         int i = 0;
 
-        for (const auto &kf : keyFrames) {
+        for (auto *kf : keyFrames) {
           std::cout << prefix << " Frame [" << i << "]\n";
 
-          kf.print(prefix + "  ");
+          kf->print(prefix + "  ");
 
           ++i;
         }
       }
     }
+
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto value = tvalue(frame);
+      if (! value) return "<none>";
+      return CUtil::toString(*value);
+    }
+
+    //---
 
     OptVal value(const OptVal &def=OptVal()) const {
       if (values.empty())
@@ -952,7 +1053,7 @@ class CLottie {
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (animated.value_or(false)) {
+      if (isAnimated()) {
         if (! isTSet())
           return def;
 
@@ -963,134 +1064,291 @@ class CLottie {
     }
 
     OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
-      if (keyFrames.empty())
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
+
+      auto nf = keyFrames.size();
+
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
         return def;
 
-      if (keyFrames.size() == 1 || frame.frame < keyFrames[0].timeFrame.value_or(0.0)) {
-        OptVal v1, v2;
+      OptVal v1, v2;
 
-        if (! keyFrames[0].startValue.vals.empty())
-          v1 = keyFrames[0].startValue.vals[0];
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
 
-        if (! keyFrames[0].endValue.vals.empty())
-          v2 = keyFrames[0].endValue.vals[0];
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
 
+      if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = frame.mapFrame();
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
         else if (v1)
           return v1;
-        else
+        else if (v2)
           return v2;
       }
-
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
-
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
-
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
-
-          if (keyFrames[i].startValue.vals.empty() && keyFrames[i].endValue.vals.empty())
-            return def;
-
-          OptVal v1, v2;
-
-          if (! keyFrames[i].startValue.vals.empty())
-            v1 = keyFrames[i].startValue.vals[0];
-
-          if (! keyFrames[i].endValue.vals.empty())
-            v2 = keyFrames[i].endValue.vals[0];
-
-          if (v1 && v2) {
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
-
-            return CLottieUtil::mapValue(dt, *v1, *v2);
-          }
-          else if (v1)
-            return v1;
-          else
-            return v2;
-        }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
       }
 
       return def;
     }
+
+   public:
+    std::vector<XYVals>     values;
+    std::vector<KeyFrame *> keyFrames;
+
+    OptInt length;
   };
+
+  //---
+
+  class SizeProperty : public CLottieProperty {
+   public:
+    using KeyFrame = CLottieKeyFrameT<XYVals>;
+    using OptVal   = std::optional<XYVals>;
+
+   public:
+    SizeProperty() :
+     CLottieProperty(Type::SIZE) {
+    }
+
+   ~SizeProperty() override {
+      for (auto *keyFrame : keyFrames)
+        delete keyFrame;
+    }
+
+    bool isSet() const override {
+      return (! values.empty() || ! keyFrames.empty());
+    }
+
+    //---
+
+    size_t numKeyFrames() const override { return keyFrames.size(); }
+
+    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+
+    //---
+
+    void print(const std::string &prefix="") const override {
+      auto printValue = [&](const std::string &n, auto value) {
+        std::cout << prefix << n << "=" << value << "\n";
+      };
+
+      CLottieProperty::print(prefix);
+
+      if (! values.empty()) {
+        printValue("values", "");
+
+        for (auto &v : values) {
+          std::cout << prefix << "  " << v << "\n";
+        }
+      }
+
+      if (! keyFrames.empty()) {
+        printValue("KeyFrames", "");
+
+        int i = 0;
+
+        for (auto *kf : keyFrames) {
+          std::cout << prefix << " Frame [" << i << "]\n";
+
+          kf->print(prefix + "  ");
+
+          ++i;
+        }
+      }
+    }
+
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto value = tvalue(frame);
+      if (! value) return "<none>";
+      return CUtil::toString(*value);
+    }
+
+    //---
+
+    OptVal value(const OptVal &def=OptVal()) const {
+      if (values.empty())
+        return def;
+
+      return values[0];
+    }
+
+    OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (isAnimated()) {
+        if (! isTSet())
+          return def;
+
+        return keyFrameValue(frame, def);
+      }
+      else
+        return value(def);
+    }
+
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
+
+      auto nf = keyFrames.size();
+
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
+        return def;
+
+      OptVal v1, v2;
+
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
+
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
+
+      if (frameInd.pos == FramePos::INSIDE) {
+        if (v1 && v2) {
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+
+          return CLottieUtil::mapValue(dt, *v1, *v2);
+        }
+        else if (v1)
+          return v1;
+        else if (v2)
+          return v2;
+      }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
+      }
+
+      return def;
+    }
+
+   public:
+    std::vector<XYVals>     values;
+    std::vector<KeyFrame *> keyFrames;
+  };
+
+  //---
 
   using PointList = CLottieUtil::PointList;
 
-  struct BezierProperty : Property {
-    struct KeyFrame {
-      std::vector<CPoint2D> ipoints;
-      std::vector<CPoint2D> opoints;
-      std::vector<CPoint2D> vpoints;
-      bool                  closed { false };
-
-      void print(const std::string &prefix="") const {
-        auto printValue = [&](const std::string &n, auto value) {
-          std::cout << prefix << n << "=" << value << "\n";
-        };
-
-        printValue("closed", closed);
-
-        if (! ipoints.empty()) {
-          printValue("ipoints", "");
-
-          for (auto &p : ipoints) {
-            std::cout << prefix << "  " << p << "\n";
-          }
-        }
-
-        if (! opoints.empty()) {
-          printValue("opoints", "");
-
-          for (auto &p : opoints) {
-            std::cout << prefix << "  " << p << "\n";
-          }
-        }
-
-        if (! vpoints.empty()) {
-          printValue("vpoints", "");
-
-          for (auto &p : vpoints) {
-            std::cout << prefix << "  " << p << "\n";
-          }
-        }
-      }
-    };
-
-    bool                     closed { false };
-    std::vector<PointList>   values;
-    std::vector<PointList>   ivalues;
-    std::vector<PointList>   ovalues;
-    std::vector<PointList>   vvalues;
-    std::vector<std::string> interpolation;
-    OptReal                  timeFrame;
-    std::vector<KeyFrame>    ikeyFrames;
-    std::vector<KeyFrame>    ekeyFrames;
-
-    void print(const std::string &prefix="") const {
+  class BezierKeyFrame : public CLottieKeyFrame {
+   public:
+    void print(const std::string &prefix="") const override {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
       };
 
-      auto optPrintValue = [&](const std::string &n, const auto &value) {
-        if (value)
-          std::cout << prefix << n << "=" << *value << "\n";
+      printValue("closed", closed);
+
+      if (! ipoints.empty()) {
+        printValue("ipoints", "");
+
+        for (auto &p : ipoints) {
+          std::cout << prefix << "  " << p << "\n";
+        }
+      }
+
+      if (! opoints.empty()) {
+        printValue("opoints", "");
+
+        for (auto &p : opoints) {
+          std::cout << prefix << "  " << p << "\n";
+        }
+      }
+
+      if (! vpoints.empty()) {
+        printValue("vpoints", "");
+
+        for (auto &p : vpoints) {
+          std::cout << prefix << "  " << p << "\n";
+        }
+      }
+    }
+
+   public:
+    std::vector<CPoint2D> ipoints;
+    std::vector<CPoint2D> opoints;
+    std::vector<CPoint2D> vpoints;
+    bool                  closed { false };
+  };
+
+  class BezierProperty : public CLottieProperty {
+   public:
+    using OptVal   = std::optional<PointList>;
+    using KeyFrame = BezierKeyFrame;
+
+   public:
+    BezierProperty() :
+     CLottieProperty(Type::BEZIER) {
+    }
+
+   ~BezierProperty() override {
+      for (auto *keyFrame : ikeyFrames)
+        delete keyFrame;
+
+      for (auto *keyFrame : ekeyFrames)
+        delete keyFrame;
+    }
+
+    //---
+
+    size_t numKeyFrames() const override { return ikeyFrames.size(); }
+
+    CLottieKeyFrame *keyFrame(uint i) const override { return ikeyFrames[i]; }
+
+    //---
+
+    void print(const std::string &prefix="") const override {
+      auto printValue = [&](const std::string &n, auto value) {
+        std::cout << prefix << n << "=" << value << "\n";
       };
 
-      optPrintValue("animated", animated);
-
-      optPrintValue("index", index);
+      CLottieProperty::print(prefix);
 
       printValue("closed", closed);
 
@@ -1129,23 +1387,25 @@ class CLottie {
       if (! ikeyFrames.empty()) {
         printValue("ikeyFrames", "");
 
-        for (auto &k : ikeyFrames)
-          k.print(prefix + "  ");
+        for (auto *k : ikeyFrames)
+          k->print(prefix + "  ");
       }
 
       if (! ekeyFrames.empty()) {
         printValue("ikeyFrames", "");
 
-        for (auto &k : ekeyFrames)
-          k.print(prefix + "  ");
+        for (auto *k : ekeyFrames)
+          k->print(prefix + "  ");
       }
     }
 
-    bool isSet() const {
+    //---
+
+    bool isSet() const override {
       return (! vvalues.empty() || ! ivalues.empty());
     }
 
-    bool isTSet() const {
+    bool isTSet() const override {
       return (! ikeyFrames.empty() && ! ekeyFrames.empty());
     }
 
@@ -1153,29 +1413,43 @@ class CLottie {
     bool isOSet() const { return ! ovalues.empty(); }
     bool isVSet() const { return ! vvalues.empty(); }
 
-    const PointList &ivalue(const PointList &def) const {
+    //---
+
+    std::string tvalueStr(const TimeFrame &frame) const override {
+      auto ivalue = tivalue(frame);
+      auto ovalue = tovalue(frame);
+      std::string str;
+      str += (ivalue ? CUtil::toString(*ivalue) : "<none>");
+      str += "/";
+      str += (ivalue ? CUtil::toString(*ivalue) : "<none>");
+      return str;
+    }
+
+    //---
+
+    OptVal ivalue(const OptVal &def=OptVal()) const {
       if (! isISet())
         return def;
 
       return ivalues[0];
     }
 
-    const PointList &ovalue(const PointList &def) const {
+    OptVal ovalue(const OptVal &def=OptVal()) const {
       if (! isOSet())
         return def;
 
       return ovalues[0];
     }
 
-    const PointList &vvalue(const PointList &def) const {
+    OptVal vvalue(const OptVal &def=OptVal()) const {
       if (! isVSet())
         return def;
 
       return vvalues[0];
     }
 
-    PointList tivalue(const TimeFrame &frame, const PointList &def) const {
-      if (animated.value_or(false)) {
+    OptVal tivalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (isAnimated()) {
         if (! isTSet())
           return ivalue(def);
 
@@ -1183,8 +1457,8 @@ class CLottie {
         auto t2 = (t1 + 1) % ekeyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1].ipoints;
-        const auto &v2 = ekeyFrames[t2].ipoints;
+        const auto &v1 = ikeyFrames[t1]->ipoints;
+        const auto &v2 = ekeyFrames[t2]->ipoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
       }
@@ -1192,8 +1466,8 @@ class CLottie {
         return ivalue(def);
     }
 
-    PointList tovalue(const TimeFrame &frame, const PointList &def) const {
-      if (animated.value_or(false)) {
+    OptVal tovalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (isAnimated()) {
         if (! isTSet())
           return ovalue(def);
 
@@ -1201,8 +1475,8 @@ class CLottie {
         auto t2 = (t1 + 1) % ekeyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1].opoints;
-        const auto &v2 = ekeyFrames[t2].opoints;
+        const auto &v1 = ikeyFrames[t1]->opoints;
+        const auto &v2 = ekeyFrames[t2]->opoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
       }
@@ -1210,8 +1484,8 @@ class CLottie {
         return ovalue(def);
     }
 
-    PointList tvvalue(const TimeFrame &frame, const PointList &def) const {
-      if (animated.value_or(false)) {
+    OptVal tvvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (isAnimated()) {
         if (! isTSet())
           return vvalue(def);
 
@@ -1220,8 +1494,8 @@ class CLottie {
         auto t2 = (t1 + 1) % ekeyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1].vpoints;
-        const auto &v2 = ekeyFrames[t2].vpoints;
+        const auto &v1 = ikeyFrames[t1]->vpoints;
+        const auto &v2 = ekeyFrames[t2]->vpoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
 #else
@@ -1233,14 +1507,14 @@ class CLottie {
     }
 
     bool tclosed(const TimeFrame &frame) const {
-      if (animated.value_or(false)) {
+      if (isAnimated()) {
         if (! isTSet())
           return closed;
 
 #if 1
         auto t1 = int(CMathRound::RoundDown(frame.secs) % ikeyFrames.size());
 
-        auto v1 = ikeyFrames[t1].closed;
+        auto v1 = ikeyFrames[t1]->closed;
 
         return v1;
 #else
@@ -1252,55 +1526,93 @@ class CLottie {
     }
 
 #if 0
-    PointList keyFrameValue(const TimeFrame &frame, const PointList &def) const {
-      if (keyFrames.empty())
-        return def;
+    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return def;
 
-      if (keyFrames.size() == 1) {
-        auto v1 = keyFrames[0].startValue.vals[0];
-        auto v2 = keyFrames[0].endValue  .vals[0];
+      auto nf = keyFrames.size();
 
-        auto dt = frame.mapFrame();
+      auto *keyFrame1 = keyFrames[frameInd.ind];
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
 
-        return CLottieUtil::mapValue(dt, v1, v2);
+      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrames[frameInd.ind];
+        }
       }
 
-      for (size_t i = 0; i < keyFrames.size(); ++i) {
-        auto frameStart1 = keyFrames[i].timeFrame.value_or(0.0);
-        auto frameStop1  = frame.frameStop.value_or(1.0);
+      if (keyFrame->startValue.vals.empty() && keyFrame->endValue.vals.empty())
+        return def;
 
-        if (i < keyFrames.size() - 1)
-          frameStop1 = keyFrames[i + 1].timeFrame.value_or(0.0);
+      OptVal v1, v2;
 
-        if (frame.frame >= frameStart1 && frame.frame < frameStop1) {
-          if (keyFrames[i].startValue.vals.empty() || keyFrames[i].endValue.vals.empty()) {
-            if (i > 0 && i == keyFrames.size() - 1)
-              --i;
-          }
+      if (! keyFrame1->startValue.vals.empty())
+        v1 = keyFrame1->startValue.vals[0];
 
-          if (! keyFrames[i].startValue.vals.empty() && ! keyFrames[i].endValue.vals.empty()) {
-            auto v1 = keyFrames[i].startValue.vals[0];
-            auto v2 = keyFrames[i].endValue  .vals[0];
+      if (! keyFrame1->endValue.vals.empty())
+        v2 = keyFrame1->endValue.vals[0];
 
-            auto dt = CMathUtil::map(frame.frame, frameStart1, frameStop1, 0.0, 1.0);
+      if (frameInd.pos == FramePos::INSIDE) {
+        if (v1 && v2) {
+          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
 
-            return CLottieUtil::mapValue(dt, v1, v2);
-          }
-          else
-            return def;
+          return CLottieUtil::mapValue(dt, *v1, *v2);
         }
+        else if (v1)
+          return v1;
+        else if (v2)
+          return v2;
+      }
+      else if (frameInd.pos == FramePos::BEFORE) {
+        if (v1)
+          return v1;
+      }
+      else if (frameInd.pos == FramePos::AFTER) {
+        if (v2)
+          return v2;
       }
 
       return def;
     }
 #endif
+
+   public:
+    bool                     closed { false };
+    std::vector<PointList>   values;
+    std::vector<PointList>   ivalues;
+    std::vector<PointList>   ovalues;
+    std::vector<PointList>   vvalues;
+    std::vector<std::string> interpolation;
+    OptReal                  timeFrame;
+    std::vector<KeyFrame *>  ikeyFrames;
+    std::vector<KeyFrame *>  ekeyFrames;
   };
 
-  using ColorProperty  = PropertyT<CRGBA>;
-  using ScalarProperty = PropertyT<double>;
-  using ArrayProperty  = PropertyT<CLottieUtil::RValArray>;
+  //---
 
-  // trasnform
+  class ColorProperty : public PropertyT<CRGBA> {
+   public:
+    ColorProperty() :
+     PropertyT(Type::COLOR) {
+    }
+  };
+
+  //---
+
+  class ArrayProperty : public PropertyT<CLottieUtil::RValArray> {
+   public:
+    ArrayProperty() :
+     PropertyT(Type::ARRAY) {
+    }
+  };
+
+  // transform
   struct Transform {
     PositionProperty      anchorPoint;
     SplitPositionProperty position;
@@ -1354,6 +1666,10 @@ class CLottie {
   CLottieAsset *getAssetById(const std::string &id) const;
 
   CLottieLayer *getLayerById(int id) const;
+
+  //---
+
+  const Shapes &shapes() const { return shapes_; }
 
   //---
 
@@ -1566,6 +1882,13 @@ class CLottieObject {
 
   //---
 
+  virtual CLottieProperty *getProperty(const std::string &name) const {
+    std::cerr << "No property of name '" << name << "'\n";
+    return nullptr;
+  }
+
+  //---
+
   void debugPrint() const;
 
   void printHier(const std::string &prefix="") const { printI(prefix, true); }
@@ -1602,8 +1925,8 @@ class CLottieRoot : public CLottieObject {
 
   //---
 
-  const std::string &version() const { return version_; }
-  void setVersion(const std::string &s) { version_ = s; }
+  const OptStr &version() const { return version_; }
+  void setVersion(const OptStr &s) { version_ = s; }
 
   const OptStr &matchName() const { return matchName_; }
   void setMatchName(const OptStr &v) { matchName_ = v; }
@@ -1654,11 +1977,11 @@ class CLottieRoot : public CLottieObject {
   void printI(const std::string &prefix, bool hier) const override;
 
  private:
-  std::string version_;
+  OptStr version_;
 
   OptStr matchName_;
 
-  TimeFrame timeFrame_;
+  TimeFrame timeFrame_; // frameRate, frameStart, frameStop
 
   OptReal width_;
   OptReal height_;
@@ -2001,6 +2324,61 @@ class CLottieLayer : public CLottieObject {
 
   //---
 
+  CLottieProperty *getProperty(const std::string &name) const override {
+    if      (name == "transform.anchorPoint") {
+      if (! transform()) return nullptr;
+      return &transform()->anchorPoint;
+    }
+    else if (name == "transform.position") {
+      if (! transform()) return nullptr;
+      return &transform()->position;
+    }
+    else if (name == "transform.rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->rotation;
+    }
+    else if (name == "transform.scale") {
+      if (! transform()) return nullptr;
+      return &transform()->scale;
+    }
+    else if (name == "transform.opacity") {
+      if (! transform()) return nullptr;
+      return &transform()->opacity;
+    }
+    else if (name == "transform.skew") {
+      if (! transform()) return nullptr;
+      return &transform()->skew;
+    }
+    else if (name == "transform.skewAxis") {
+      if (! transform()) return nullptr;
+      return &transform()->skewAxis;
+    }
+    else if (name == "transform.x_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->x_rotation;
+    }
+    else if (name == "transform.y_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->y_rotation;
+    }
+    else if (name == "transform.z_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->z_rotation;
+    }
+    else if (name == "transform.orientation") {
+      if (! transform()) return nullptr;
+      return &transform()->orientation;
+    }
+    else if (name == "precomp.timeRemap") {
+      if (! precomp()) return nullptr;
+      return &precomp()->timeRemap;
+    }
+    else
+      return CLottieObject::getProperty(name);
+  }
+
+  //---
+
   void printLayerHier(const std::string &prefix) const;
 
   void printI(const std::string &prefix, bool hier) const override;
@@ -2233,6 +2611,9 @@ class CLottieShape : public CLottieObject {
   ColorProperty &colorRef() { return color_; }
   void setColor(const ColorProperty &v) { color_ = v; }
 
+  const BezierProperty &path() const { return path_; }
+  void setPath(const BezierProperty &v) { path_ = v; }
+
   //---
 
   Transform *transform() const { return transform_; }
@@ -2329,6 +2710,173 @@ class CLottieShape : public CLottieObject {
     if (! rounded_)
       rounded_ = new Rounded;
     return rounded_;
+  }
+
+  //---
+
+  CLottieProperty *getProperty(const std::string &name) const override {
+    if      (name == "position") {
+      return const_cast<PositionProperty *>(&pos_);
+    }
+    else if (name == "size") {
+      return const_cast<SizeProperty *>(&size_);
+    }
+    else if (name == "color") {
+      return const_cast<ColorProperty *>(&color_);
+    }
+    else if (name == "path") {
+      return const_cast<BezierProperty *>(&path_);
+    }
+    else if (name == "transform.anchorPoint") {
+      if (! transform()) return nullptr;
+      return &transform()->anchorPoint;
+    }
+    else if (name == "transform.position") {
+      if (! transform()) return nullptr;
+      return &transform()->position;
+    }
+    else if (name == "transform.rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->rotation;
+    }
+    else if (name == "transform.scale") {
+      if (! transform()) return nullptr;
+      return &transform()->scale;
+    }
+    else if (name == "transform.opacity") {
+      if (! transform()) return nullptr;
+      return &transform()->opacity;
+    }
+    else if (name == "transform.skew") {
+      if (! transform()) return nullptr;
+      return &transform()->skew;
+    }
+    else if (name == "transform.skewAxis") {
+      if (! transform()) return nullptr;
+      return &transform()->skewAxis;
+    }
+    else if (name == "transform.x_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->x_rotation;
+    }
+    else if (name == "transform.y_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->y_rotation;
+    }
+    else if (name == "transform.z_rotation") {
+      if (! transform()) return nullptr;
+      return &transform()->z_rotation;
+    }
+    else if (name == "transform.orientation") {
+      if (! transform()) return nullptr;
+      return &transform()->orientation;
+    }
+    else if (name == "fill.color") {
+      if (! fill()) return nullptr;
+      return &fill()->color;
+    }
+    else if (name == "fill.opacity") {
+      if (! fill()) return nullptr;
+      return &fill()->opacity;
+    }
+    else if (name == "stroke.color") {
+      if (! stroke()) return nullptr;
+      return &stroke()->color;
+    }
+    else if (name == "stroke.opacity") {
+      if (! stroke()) return nullptr;
+      return &stroke()->opacity;
+    }
+    else if (name == "stroke.width") {
+      if (! stroke()) return nullptr;
+      return &stroke()->width;
+    }
+    else if (name == "stroke.miterLimitAnim") {
+      if (! stroke()) return nullptr;
+      return &stroke()->miterLimitAnim;
+    }
+    else if (name == "stroke.dash.value") {
+      if (! stroke()) return nullptr;
+      return &stroke()->dash.value;
+    }
+    else if (name == "group.color") {
+      if (! group()) return nullptr;
+      return &group()->color;
+    }
+    else if (name == "group.opacity") {
+      if (! group()) return nullptr;
+      return &group()->opacity;
+    }
+    else if (name == "gradientFill.color") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->color;
+    }
+    else if (name == "gradientFill.opacity") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->opacity;
+    }
+    else if (name == "gradientFill.startPoint") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->startPoint;
+    }
+    else if (name == "gradientFill.endPoint") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->endPoint;
+    }
+    else if (name == "gradientFill.highlightLength") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->highlightLength;
+    }
+    else if (name == "gradientFill.highlightAngle") {
+      if (! gradientFill()) return nullptr;
+      return &gradientFill()->highlightAngle;
+    }
+    else if (name == "gradientStroke.opacity") {
+      if (! gradientStroke()) return nullptr;
+      return &gradientStroke()->opacity;
+    }
+    else if (name == "gradientStroke.startPoint") {
+      if (! gradientStroke()) return nullptr;
+      return &gradientStroke()->startPoint;
+    }
+    else if (name == "gradientStroke.endPoint") {
+      if (! gradientStroke()) return nullptr;
+      return &gradientStroke()->endPoint;
+    }
+    else if (name == "gradientStroke.width") {
+      if (! gradientStroke()) return nullptr;
+      return &gradientStroke()->width;
+    }
+    else if (name == "gradientStroke.dash.value") {
+      if (! gradientStroke()) return nullptr;
+      return &gradientStroke()->dash.value;
+    }
+    else if (name == "repeater.transform.anchorPoint") {
+      if (! repeater() || ! repeater()->transform) return nullptr;
+      return &repeater()->transform->anchorPoint;
+    }
+    else if (name == "repeater.transform.position") {
+      if (! repeater() || ! repeater()->transform) return nullptr;
+      return &repeater()->transform->position;
+    }
+    else if (name == "rectangle.roundness") {
+      if (! rectangle()) return nullptr;
+      return &rectangle()->roundness;
+    }
+    else if (name == "trim.start") {
+      if (! trim()) return nullptr;
+      return &trim()->start;
+    }
+    else if (name == "trim.end") {
+      if (! trim()) return nullptr;
+      return &trim()->end;
+    }
+    else if (name == "trim.offset") {
+      if (! trim()) return nullptr;
+      return &trim()->offset;
+    }
+    else
+      return CLottieObject::getProperty(name);
   }
 
   //---

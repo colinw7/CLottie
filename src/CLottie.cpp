@@ -1119,7 +1119,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                   std::cout << depthStr(kObj->hier_depth()) << kname << "=" << *kvalue << "\n";
 
                 if      (kname == "a") {
-                  gradientFill->colors.animated = valueToBool(kvalue);
+                  gradientFill->colors.setAnimated(valueToBool(kvalue));
                 }
                 else if (kname == "k") {
                   if (! kvalue->isArray())
@@ -1127,16 +1127,16 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
 
                   auto *kArray = kvalue->cast<CJson::Array>();
 
-                  if (! gradientFill->colors.animated && kArray->size() > 0 &&
+                  if (! gradientFill->colors.isAnimatedSet() && kArray->size() > 0 &&
                       kArray->at(0)->isObject())
-                    gradientFill->colors.animated = true;
+                    gradientFill->colors.setAnimated(true);
 
-                  if (gradientFill->colors.animated.value_or(false)) {
+                  if (gradientFill->colors.isAnimated()) {
                     for (const auto &kvalue1 : kArray->values()) {
                       if (! kvalue1->isObject())
                         return errorMsg(msg1, "gradient fill colors k value not an object");
 
-                      ArrayProperty::KeyFrame keyFrame;
+                      auto *keyFrame = new ArrayProperty::KeyFrame;
 
                       auto *kObj1 = kvalue1->cast<CJson::Object>();
 
@@ -1150,29 +1150,29 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                         kObj1->getNamedValue(kname1, kvalue2);
 
                         if      (kname1 == "i") { // input
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame.ivalues);
+                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ivalues_);
                         }
                         else if (kname1 == "o") { // output
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame.ovalues);
+                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ovalues_);
                         }
                         else if (kname1 == "s") { // start value
                           std::vector<double> startValue;
                           if (! readNumbers(msg2, kvalue2, startValue))
                             return errorMsg(msg2, "readNumbers");
-                          keyFrame.startValue.vals.push_back(startValue);
+                          keyFrame->startValue.vals.push_back(startValue);
                         }
                         else if (kname1 == "e") { // end value
                           std::vector<double> endValue;
                           if (! readNumbers(msg2, kvalue2, endValue))
                             return errorMsg(msg2, "readNumbers");
-                          keyFrame.endValue.vals.push_back(endValue);
+                          keyFrame->endValue.vals.push_back(endValue);
                         }
                         else if (kname1 == "n") { // interpolation key
-                          if (! readStrings(msg2, kvalue2, keyFrame.interpolation))
+                          if (! readStrings(msg2, kvalue2, keyFrame->interpolation_))
                             return errorMsg(msg2, "readStrings");
                         }
                         else if (kname1 == "t") { // ???
-                          keyFrame.timeFrame = valueToReal(kvalue2);
+                          keyFrame->timeFrame_ = valueToReal(kvalue2);
                         }
                         else
                           unhandledName(kname1, kvalue2);
@@ -1189,7 +1189,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                   }
                 }
                 else if (kname == "ix") {
-                  gradientFill->colors.index = valueToInt(kvalue);
+                  gradientFill->colors.setIndex(valueToInt(kvalue));
                 }
                 else
                   unhandledName(kname, kvalue);
@@ -1334,7 +1334,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                   std::cout << depthStr(kObj->hier_depth()) << kname << "=" << *kvalue << "\n";
 
                 if      (kname == "a") {
-                  gradientStroke->colors.animated = valueToBool(kvalue);
+                  gradientStroke->colors.setAnimated(valueToBool(kvalue));
                 }
                 else if (kname == "k") {
                   if (! kvalue->isArray())
@@ -1342,16 +1342,16 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
 
                   auto *kArray = kvalue->cast<CJson::Array>();
 
-                  if (! gradientStroke->colors.animated && kArray->size() > 0 &&
+                  if (! gradientStroke->colors.isAnimatedSet() && kArray->size() > 0 &&
                       kArray->at(0)->isObject())
-                    gradientStroke->colors.animated = true;
+                    gradientStroke->colors.setAnimated(true);
 
-                  if (gradientStroke->colors.animated.value_or(false)) {
+                  if (gradientStroke->colors.isAnimated()) {
                     for (const auto &kvalue1 : kArray->values()) {
                       if (! kvalue1->isObject())
                         return errorMsg(msg1, "gradient stroke colors k value not an object");
 
-                      ArrayProperty::KeyFrame keyFrame;
+                      auto *keyFrame = new ArrayProperty::KeyFrame;
 
                       auto *kObj1 = kvalue1->cast<CJson::Object>();
 
@@ -1365,29 +1365,29 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                         kObj1->getNamedValue(kname1, kvalue2);
 
                         if      (kname1 == "i") { // input
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame.ivalues);
+                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ivalues_);
                         }
                         else if (kname1 == "o") { // output
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame.ovalues);
+                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ovalues_);
                         }
                         else if (kname1 == "s") { // start value
                           std::vector<double> startValue;
                           if (! readNumbers(msg2, kvalue2, startValue))
                             return errorMsg(msg2, "readNumbers");
-                          keyFrame.startValue.vals.push_back(startValue);
+                          keyFrame->startValue.vals.push_back(startValue);
                         }
                         else if (kname1 == "e") { // end value
                           std::vector<double> endValue;
                           if (! readNumbers(msg2, kvalue2, endValue))
                             return errorMsg(msg2, "readVector");
-                          keyFrame.endValue.vals.push_back(endValue);
+                          keyFrame->endValue.vals.push_back(endValue);
                         }
                         else if (kname1 == "n") { // interpolation key
-                          if (! readStrings(msg2, kvalue2, keyFrame.interpolation))
+                          if (! readStrings(msg2, kvalue2, keyFrame->interpolation_))
                             return errorMsg(msg2, "readStrings");
                         }
                         else if (kname1 == "t") { // ???
-                          keyFrame.timeFrame = valueToReal(kvalue2);
+                          keyFrame->timeFrame_ = valueToReal(kvalue2);
                         }
                         else
                           unhandledName(kname1, kvalue2);
@@ -1404,7 +1404,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                   }
                 }
                 else if (kname == "ix") {
-                  gradientStroke->colors.index = valueToInt(kvalue);
+                  gradientStroke->colors.setIndex(valueToInt(kvalue));
                 }
                 else
                   unhandledName(kname, kvalue);
@@ -1864,7 +1864,7 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      position.animated = valueToBool(value2);
+      position.setAnimated(valueToBool(value2));
     }
     else if (name1 == "s") {
       position.split = valueToBool(value2);
@@ -1875,15 +1875,15 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
       auto *kArray2 = value2->cast<CJson::Array>();
 
-      if (! position.animated && kArray2->size() > 0 && kArray2->at(0)->isObject())
-        position.animated = true;
+      if (! position.isAnimatedSet() && kArray2->size() > 0 && kArray2->at(0)->isObject())
+        position.setAnimated(true);
 
-      if (position.animated.value_or(false)) {
+      if (position.isAnimated()) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
             return errorMsg(msg1, "k value is not an object");
 
-          SplitPositionProperty::KeyFrame keyFrame;
+          auto *keyFrame = new SplitPositionProperty::KeyFrame;
 
           auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -1900,44 +1900,44 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
               if (! readVector(msg2, value3, startValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.startValue.vals.push_back(startValue);
+              keyFrame->startValue.vals.push_back(startValue);
             }
             else if (name2 == "e") { // end value
               CPoint2D endValue;
               if (! readVector(msg2, value3, endValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.endValue.vals.push_back(endValue);
+              keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame.interpolation))
+              if (! readStrings(msg2, value3, keyFrame->interpolation_))
                 return errorMsg(msg2, "readStrings");
             }
             else if (name2 == "h") { // hold
-              keyFrame.hold = valueToInt(value3);
+              keyFrame->hold_ = valueToInt(value3);
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentIn = tangentIn;
+              keyFrame->tangentIn_ = tangentIn;
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentOut = tangentOut;
+              keyFrame->tangentOut_ = tangentOut;
             }
             else if (name2 == "t") { // ???
-              keyFrame.timeFrame = valueToReal(value3);
+              keyFrame->timeFrame_ = valueToReal(value3);
             }
             else
               unhandledName(name2, value3);
@@ -1968,7 +1968,7 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
         return errorMsg(msg1, "readScalarProperty");
     }
     else if (name1 == "ix") {
-      position.index = valueToInt(value2);
+      position.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
       position.length = valueToInt(value2);
@@ -2003,21 +2003,21 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      vector.animated = valueToBool(value2);
+      vector.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
       if (value2->isArray()) {
         auto *kArray2 = value2->cast<CJson::Array>();
 
-        if (! vector.animated && kArray2->size() > 0 && kArray2->at(0)->isObject())
-          vector.animated = true;
+        if (! vector.isAnimatedSet() && kArray2->size() > 0 && kArray2->at(0)->isObject())
+          vector.setAnimated(true);
 
-        if (vector.animated.value_or(false)) {
+        if (vector.isAnimated()) {
           for (const auto &kValue : kArray2->values()) {
             if (! kValue->isObject())
               return errorMsg(msg1, "k value is not an object");
 
-            VectorProperty::KeyFrame keyFrame;
+            auto *keyFrame = new VectorProperty::KeyFrame;
 
             auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -2034,44 +2034,44 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
               if      (name2 == "i") { // input
-                getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+                getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
               }
               else if (name2 == "o") { // output
-                getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+                getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
               }
               else if (name2 == "s") { // start value
                 CPoint2D startValue;
                 if (! readVector(msg2, value3, startValue))
                   return errorMsg(msg2, "readVector");
-                keyFrame.startValue.vals.push_back(startValue);
+                keyFrame->startValue.vals.push_back(startValue);
               }
               else if (name2 == "e") { // end value
                 CPoint2D endValue;
                 if (! readVector(msg2, value3, endValue))
                   return errorMsg(msg2, "readVector");
-                keyFrame.endValue.vals.push_back(endValue);
+                keyFrame->endValue.vals.push_back(endValue);
               }
               else if (name2 == "n") { // interpolation key
-                if (! readStrings(msg2, value3, keyFrame.interpolation))
+                if (! readStrings(msg2, value3, keyFrame->interpolation_))
                   return errorMsg(msg2, "readStrings");
               }
               else if (name2 == "h") { // hold
-                keyFrame.hold = valueToInt(value3);
+                keyFrame->hold_ = valueToInt(value3);
               }
               else if (name2 == "ti") { // Value in Tangent
                 CPoint2D tangentIn;
                 if (! readVector(msg2, value3, tangentIn))
                   return errorMsg(msg2, "readVector");
-                keyFrame.tangentIn = tangentIn;
+                keyFrame->tangentIn_ = tangentIn;
               }
               else if (name2 == "to") { // Value Out Tangent
                 CPoint2D tangentOut;
                 if (! readVector(msg2, value3, tangentOut))
                   return errorMsg(msg2, "readVector");
-                keyFrame.tangentOut = tangentOut;
+                keyFrame->tangentOut_ = tangentOut;
               }
               else if (name2 == "t") { // ???
-                keyFrame.timeFrame = valueToReal(value3);
+                keyFrame->timeFrame_ = valueToReal(value3);
               }
               else
                 unhandledName(name2, value3);
@@ -2095,7 +2095,7 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
       }
     }
     else if (name1 == "ix") {
-      vector.index = valueToInt(value2);
+      vector.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
       vector.length = valueToInt(value2);
@@ -2130,7 +2130,7 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      position.animated = valueToBool(value2);
+      position.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
       if (! value2->isArray())
@@ -2138,12 +2138,12 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
       auto *kArray2 = value2->cast<CJson::Array>();
 
-      if (position.animated.value_or(false)) {
+      if (position.isAnimated()) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
             return errorMsg(msg1, "k value is not an object");
 
-          PositionProperty::KeyFrame keyFrame;
+          auto *keyFrame = new PositionProperty::KeyFrame;
 
           auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -2160,44 +2160,44 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
               if (! readVector(msg2, value3, startValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.startValue.vals.push_back(startValue);
+              keyFrame->startValue.vals.push_back(startValue);
             }
             else if (name2 == "e") { // end value
               CPoint2D endValue;
               if (! readVector(msg2, value3, endValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.endValue.vals.push_back(endValue);
+              keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame.interpolation))
+              if (! readStrings(msg2, value3, keyFrame->interpolation_))
                 return errorMsg(msg2, "readStrings");
             }
             else if (name2 == "h") { // hold
-              keyFrame.hold = valueToInt(value3);
+              keyFrame->hold_ = valueToInt(value3);
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentIn = tangentIn;
+              keyFrame->tangentIn_ = tangentIn;
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentOut = tangentOut;
+              keyFrame->tangentOut_ = tangentOut;
             }
             else if (name2 == "t") { // ???
-              keyFrame.timeFrame = valueToReal(value3);
+              keyFrame->timeFrame_ = valueToReal(value3);
             }
             else
               unhandledName(name2, value3);
@@ -2220,7 +2220,7 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       }
     }
     else if (name1 == "ix") {
-      position.index = valueToInt(value2);
+      position.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
       position.length = valueToInt(value2);
@@ -2254,7 +2254,7 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      size.animated = valueToBool(value2);
+      size.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
       if (! value2->isArray())
@@ -2262,12 +2262,12 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
 
       auto *kArray2 = value2->cast<CJson::Array>();
 
-      if (size.animated.value_or(false)) {
+      if (size.isAnimated()) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
             return errorMsg(msg1, "k value is not an object");
 
-          SizeProperty::KeyFrame keyFrame;
+          auto *keyFrame = new SizeProperty::KeyFrame;
 
           auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -2284,44 +2284,44 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
               if (! readVector(msg2, value3, startValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.startValue.vals.push_back(startValue);
+              keyFrame->startValue.vals.push_back(startValue);
             }
             else if (name2 == "e") { // end value
               CPoint2D endValue;
               if (! readVector(msg2, value3, endValue))
                 return errorMsg(msg2, "readVector");
-              keyFrame.endValue.vals.push_back(endValue);
+              keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame.interpolation))
+              if (! readStrings(msg2, value3, keyFrame->interpolation_))
                 return errorMsg(msg2, "readStrings");
             }
             else if (name2 == "h") { // hold
-              keyFrame.hold = valueToInt(value3);
+              keyFrame->hold_ = valueToInt(value3);
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentIn = tangentIn;
+              keyFrame->tangentIn_ = tangentIn;
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentOut = tangentOut;
+              keyFrame->tangentOut_ = tangentOut;
             }
             else if (name2 == "t") { // ???
-              keyFrame.timeFrame = valueToReal(value3);
+              keyFrame->timeFrame_ = valueToReal(value3);
             }
             else
               unhandledName(name2, value3);
@@ -2344,7 +2344,7 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
       }
     }
     else if (name1 == "ix") {
-      size.index = valueToInt(value2);
+      size.setIndex(valueToInt(value2));
     }
     else
       unhandledName(name1, value2);
@@ -2375,7 +2375,7 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      color.animated = valueToBool(value2);
+      color.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
       if (! value2->isArray())
@@ -2383,12 +2383,12 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
 
       auto *kArray2 = value2->cast<CJson::Array>();
 
-      if (color.animated.value_or(false)) {
+      if (color.isAnimated()) {
         for (const auto &kValue : kArray2->values()) {
           if (! kValue->isObject())
             return errorMsg(msg1, "k value is not an object");
 
-          ColorProperty::KeyFrame keyFrame;
+          auto *keyFrame = new ColorProperty::KeyFrame;
 
           auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -2405,10 +2405,10 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
             }
             else if (name2 == "s") { // start value
 #if 0
@@ -2416,13 +2416,13 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               if (! readNumbers(msg2, value3, numbers))
                 return errorMsg(msg2, "readNumbers");
               for (const auto &n : numbers)
-                keyFrame.startValue.vals.push_back(CRGBA(n, n, n)); // TODO
+                keyFrame->startValue.vals.push_back(CRGBA(n, n, n)); // TODO
 #else
               OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
               if (c)
-                keyFrame.startValue.vals.push_back(c.value());
+                keyFrame->startValue.vals.push_back(c.value());
 #endif
             }
             else if (name2 == "e") { // end value
@@ -2431,36 +2431,36 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               if (! readNumbers(msg2, value3, numbers))
                 return errorMsg(msg2, "readNumbers");
               for (const auto &n : numbers)
-                keyFrame.startValue.vals.push_back(CRGBA(n, n, n)); // TODO
+                keyFrame->startValue.vals.push_back(CRGBA(n, n, n)); // TODO
 #else
               OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
               if (c)
-                keyFrame.endValue.vals.push_back(c.value());
+                keyFrame->endValue.vals.push_back(c.value());
 #endif
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame.interpolation))
+              if (! readStrings(msg2, value3, keyFrame->interpolation_))
                 return errorMsg(msg2, "readStrings");
             }
             else if (name2 == "h") { // hold
-              keyFrame.hold = valueToInt(value3);
+              keyFrame->hold_ = valueToInt(value3);
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentIn = tangentIn;
+              keyFrame->tangentIn_ = tangentIn;
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame.tangentOut = tangentOut;
+              keyFrame->tangentOut_ = tangentOut;
             }
             else if (name2 == "t") { // ???
-              keyFrame.timeFrame = valueToReal(value3);
+              keyFrame->timeFrame_ = valueToReal(value3);
             }
             else
               unhandledName(name2, value3);
@@ -2479,7 +2479,7 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
       }
     }
     else if (name1 == "ix") {
-      color.index = valueToInt(value2);
+      color.setIndex(valueToInt(value2));
     }
     else
       unhandledName(name1, value2);
@@ -2511,7 +2511,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      bezier.animated = valueToBool(value2);
+      bezier.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
       auto readBezier = [&](const CJson::ValueP &bvalue) {
@@ -2536,7 +2536,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
             if (value3->isArray()) {
               auto *kArray3 = value3->cast<CJson::Array>();
 
-              if (bezier.animated.value_or(false)) {
+              if (bezier.isAnimated()) {
                 for (const auto &kValue3 : kArray3->values()) {
                   std::vector<CPoint2D> points;
                   if (! readPointList(msg1, kValue3, points))
@@ -2595,7 +2595,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
             if (value3->isArray()) {
               auto *kArray3 = value3->cast<CJson::Array>();
 
-              if (bezier.animated.value_or(false)) {
+              if (bezier.isAnimated()) {
                 for (const auto &kValue3 : kArray3->values()) {
                   std::vector<CPoint2D> points;
                   if (! readPointList(msg1, kValue3, points))
@@ -2656,7 +2656,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
             auto *kArray3 = value3->cast<CJson::Array>();
 
-            if (bezier.animated.value_or(false)) {
+            if (bezier.isAnimated()) {
               for (const auto &kValue3 : kArray3->values()) {
                 std::vector<CPoint2D> points;
                 if (! readPointList(msg1, kValue3, points))
@@ -2686,7 +2686,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
           else if (name2 == "s") { // ???
             auto *kArray3 = value3->cast<CJson::Array>();
 
-            BezierProperty::KeyFrame keyFrame;
+            auto *keyFrame = new BezierProperty::KeyFrame;
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
@@ -2704,20 +2704,20 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 kObj4->getNamedValue(name4, value5);
 
                 if      (name4 == "i") {
-                  if (! readPointList(msg1, value5, keyFrame.ipoints))
+                  if (! readPointList(msg1, value5, keyFrame->ipoints))
                     return false;
                 }
                 else if (name4 == "o") {
-                  if (! readPointList(msg1, value5, keyFrame.opoints))
+                  if (! readPointList(msg1, value5, keyFrame->opoints))
                     return false;
                 }
                 else if (name4 == "v") {
                   std::vector<CPoint2D> points;
-                  if (! readPointList(msg1, value5, keyFrame.vpoints))
+                  if (! readPointList(msg1, value5, keyFrame->vpoints))
                     return false;
                 }
                 else if (name4 == "c") {
-                  keyFrame.closed = value5->toBool();
+                  keyFrame->closed = value5->toBool();
                 }
                 else
                   unhandledName(name4, value5);
@@ -2729,7 +2729,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
           else if (name2 == "e") { // ???
             auto *kArray3 = value3->cast<CJson::Array>();
 
-            BezierProperty::KeyFrame keyFrame;
+            auto *keyFrame = new BezierProperty::KeyFrame;
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
@@ -2747,20 +2747,20 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 kObj4->getNamedValue(name4, value5);
 
                 if      (name4 == "i") {
-                  if (! readPointList(msg1, value5, keyFrame.ipoints))
+                  if (! readPointList(msg1, value5, keyFrame->ipoints))
                     return false;
                 }
                 else if (name4 == "o") {
-                  if (! readPointList(msg1, value5, keyFrame.opoints))
+                  if (! readPointList(msg1, value5, keyFrame->opoints))
                     return false;
                 }
                 else if (name4 == "v") {
                   std::vector<CPoint2D> points;
-                  if (! readPointList(msg1, value5, keyFrame.vpoints))
+                  if (! readPointList(msg1, value5, keyFrame->vpoints))
                     return false;
                 }
                 else if (name4 == "c") {
-                  keyFrame.closed = value5->toBool();
+                  keyFrame->closed = value5->toBool();
                 }
                 else
                   unhandledName(name4, value5);
@@ -2790,10 +2790,10 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
       }
     }
     else if (name1 == "ix") {
-      bezier.index = valueToInt(value2);
+      bezier.setIndex(valueToInt(value2));
     }
     else if (name1 == "x") {
-      bezier.expression = valueToString(value2);
+      bezier.setExpression(valueToString(value2));
     }
     else
       unhandledName(name1, value2);
@@ -2808,7 +2808,7 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
                    ScalarProperty &scalar) const
 {
   if (! iValue->isObject()) {
-    scalar.animated = false;
+    scalar.setAnimated(false);
 
     auto r = valueToReal(iValue);
 
@@ -2832,13 +2832,13 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
       std::cout << depthStr(sObj->hier_depth()) << name1 << "=" << *value2 << "\n";
 
     if      (name1 == "a") {
-      scalar.animated = valueToBool(value2);
+      scalar.setAnimated(valueToBool(value2));
     }
     else if (name1 == "k") {
-      if (! scalar.animated && value2->isArray())
-        scalar.animated = true;
+      if (! scalar.isAnimatedSet() && value2->isArray())
+        scalar.setAnimated(true);
 
-      if (scalar.animated.value_or(false)) {
+      if (scalar.isAnimated()) {
         if (! value2->isArray())
           return errorMsg(msg1, "k is not an array");
 
@@ -2848,7 +2848,7 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
           if (! kValue->isObject())
             return errorMsg(msg1, "k value is not an object");
 
-          ScalarProperty::KeyFrame keyFrame;
+          auto *keyFrame = new ScalarProperty::KeyFrame;
 
           auto *kObj3 = kValue->cast<CJson::Object>();
 
@@ -2865,32 +2865,32 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ivalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame.ovalues);
+              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
             }
             else if (name2 == "s") { // start value
               std::vector<double> numbers;
               if (! readNumbers(msg2, value3, numbers))
                 return errorMsg(msg2, "readNumbers");
-              keyFrame.startValue = numbers;
+              keyFrame->startValue = numbers;
             }
             else if (name2 == "e") { // end value
               std::vector<double> numbers;
               if (! readNumbers(msg2, value3, numbers))
                 return errorMsg(msg2, "readNumbers");
-              keyFrame.endValue = numbers;
+              keyFrame->endValue = numbers;
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame.interpolation))
+              if (! readStrings(msg2, value3, keyFrame->interpolation_))
                 return errorMsg(msg2, "readStrings");
             }
             else if (name2 == "h") { // hold
-              keyFrame.hold = valueToInt(value3);
+              keyFrame->hold_ = valueToInt(value3);
             }
             else if (name2 == "t") { // ???
-              keyFrame.timeFrame = valueToReal(value3);
+              keyFrame->timeFrame_ = valueToReal(value3);
             }
             else
               unhandledName(name2, value3);
@@ -2906,10 +2906,10 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
       }
     }
     else if (name1 == "ix") {
-      scalar.index = valueToInt(value2);
+      scalar.setIndex(valueToInt(value2));
     }
     else if (name1 == "x") {
-      scalar.expression = valueToString(value2);
+      scalar.setExpression(valueToString(value2));
     }
     else
       unhandledName(name1, value2);
@@ -3455,7 +3455,7 @@ printI(const std::string &prefix, bool hier) const
 
   //---
 
-  printValue(prefix, "version", version_);
+  optPrintValue(prefix, "version", version_);
 
   optPrintValue(prefix, "frameRate" , timeFrame_.frameRate);
   optPrintValue(prefix, "frameStart", timeFrame_.frameStart);

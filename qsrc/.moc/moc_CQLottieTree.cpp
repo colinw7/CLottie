@@ -296,8 +296,8 @@ int CQLottieTreeDelegate::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     return _id;
 }
 struct qt_meta_stringdata_CQLottieObjectTree_t {
-    QByteArrayData data[14];
-    char stringdata0[156];
+    QByteArrayData data[15];
+    char stringdata0[169];
 };
 #define QT_MOC_LITERAL(idx, ofs, len) \
     Q_STATIC_BYTE_ARRAY_DATA_HEADER_INITIALIZER_WITH_OFFSET(len, \
@@ -319,14 +319,15 @@ QT_MOC_LITERAL(9, 108, 9), // "expandAll"
 QT_MOC_LITERAL(10, 118, 11), // "QModelIndex"
 QT_MOC_LITERAL(11, 130, 3), // "ind"
 QT_MOC_LITERAL(12, 134, 11), // "collapseAll"
-QT_MOC_LITERAL(13, 146, 9) // "printSlot"
+QT_MOC_LITERAL(13, 146, 9), // "printSlot"
+QT_MOC_LITERAL(14, 156, 12) // "printAllSlot"
 
     },
     "CQLottieObjectTree\0itemClickedSlot\0\0"
     "QTreeWidgetItem*\0item\0column\0"
     "itemSelectedSlot\0customContextMenuSlot\0"
     "pos\0expandAll\0QModelIndex\0ind\0collapseAll\0"
-    "printSlot"
+    "printSlot\0printAllSlot"
 };
 #undef QT_MOC_LITERAL
 
@@ -336,7 +337,7 @@ static const uint qt_meta_data_CQLottieObjectTree[] = {
        8,       // revision
        0,       // classname
        0,    0, // classinfo
-       8,   14, // methods
+       9,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -344,14 +345,15 @@ static const uint qt_meta_data_CQLottieObjectTree[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags
-       1,    2,   54,    2, 0x08 /* Private */,
-       6,    2,   59,    2, 0x08 /* Private */,
-       7,    1,   64,    2, 0x08 /* Private */,
-       9,    1,   67,    2, 0x08 /* Private */,
-       9,    0,   70,    2, 0x28 /* Private | MethodCloned */,
-      12,    1,   71,    2, 0x08 /* Private */,
-      12,    0,   74,    2, 0x28 /* Private | MethodCloned */,
-      13,    0,   75,    2, 0x08 /* Private */,
+       1,    2,   59,    2, 0x08 /* Private */,
+       6,    2,   64,    2, 0x08 /* Private */,
+       7,    1,   69,    2, 0x08 /* Private */,
+       9,    1,   72,    2, 0x08 /* Private */,
+       9,    0,   75,    2, 0x28 /* Private | MethodCloned */,
+      12,    1,   76,    2, 0x08 /* Private */,
+      12,    0,   79,    2, 0x28 /* Private | MethodCloned */,
+      13,    0,   80,    2, 0x08 /* Private */,
+      14,    0,   81,    2, 0x08 /* Private */,
 
  // slots: parameters
     QMetaType::Void, 0x80000000 | 3, QMetaType::Int,    4,    5,
@@ -360,6 +362,7 @@ static const uint qt_meta_data_CQLottieObjectTree[] = {
     QMetaType::Void, 0x80000000 | 10,   11,
     QMetaType::Void,
     QMetaType::Void, 0x80000000 | 10,   11,
+    QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
 
@@ -380,6 +383,7 @@ void CQLottieObjectTree::qt_static_metacall(QObject *_o, QMetaObject::Call _c, i
         case 5: _t->collapseAll((*reinterpret_cast< const QModelIndex(*)>(_a[1]))); break;
         case 6: _t->collapseAll(); break;
         case 7: _t->printSlot(); break;
+        case 8: _t->printAllSlot(); break;
         default: ;
         }
     }
@@ -414,13 +418,13 @@ int CQLottieObjectTree::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 8)
+        if (_id < 9)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 8;
+        _id -= 9;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 8)
+        if (_id < 9)
             *reinterpret_cast<int*>(_a[0]) = -1;
-        _id -= 8;
+        _id -= 9;
     }
     return _id;
 }

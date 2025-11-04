@@ -1,5 +1,5 @@
 /****************************************************************************
-** Meta object code from reading C++ file 'CQLottie.h'
+** Meta object code from reading C++ file 'CQLottieToolBar.h'
 **
 ** Created by: The Qt Meta Object Compiler version 67 (Qt 5.15.13)
 **
@@ -7,11 +7,11 @@
 *****************************************************************************/
 
 #include <memory>
-#include "../CQLottie.h"
+#include "../CQLottieToolBar.h"
 #include <QtCore/qbytearray.h>
 #include <QtCore/qmetatype.h>
 #if !defined(Q_MOC_OUTPUT_REVISION)
-#error "The header file 'CQLottie.h' doesn't include <QObject>."
+#error "The header file 'CQLottieToolBar.h' doesn't include <QObject>."
 #elif Q_MOC_OUTPUT_REVISION != 67
 #error "This file was generated using the moc from 5.15.13. It"
 #error "cannot be used with the include files from this version of Qt."
@@ -21,32 +21,32 @@
 QT_BEGIN_MOC_NAMESPACE
 QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
-struct qt_meta_stringdata_CQLottie_t {
+struct qt_meta_stringdata_CQLottieToolBar_t {
     QByteArrayData data[7];
-    char stringdata0[56];
+    char stringdata0[67];
 };
 #define QT_MOC_LITERAL(idx, ofs, len) \
     Q_STATIC_BYTE_ARRAY_DATA_HEADER_INITIALIZER_WITH_OFFSET(len, \
-    qptrdiff(offsetof(qt_meta_stringdata_CQLottie_t, stringdata0) + ofs \
+    qptrdiff(offsetof(qt_meta_stringdata_CQLottieToolBar_t, stringdata0) + ofs \
         - idx * sizeof(QByteArrayData)) \
     )
-static const qt_meta_stringdata_CQLottie_t qt_meta_stringdata_CQLottie = {
+static const qt_meta_stringdata_CQLottieToolBar_t qt_meta_stringdata_CQLottieToolBar = {
     {
-QT_MOC_LITERAL(0, 0, 8), // "CQLottie"
-QT_MOC_LITERAL(1, 9, 8), // "loadSlot"
-QT_MOC_LITERAL(2, 18, 0), // ""
-QT_MOC_LITERAL(3, 19, 8), // "playSlot"
-QT_MOC_LITERAL(4, 28, 9), // "pauseSlot"
-QT_MOC_LITERAL(5, 38, 8), // "stepSlot"
-QT_MOC_LITERAL(6, 47, 8) // "tickSlot"
+QT_MOC_LITERAL(0, 0, 15), // "CQLottieToolBar"
+QT_MOC_LITERAL(1, 16, 8), // "loadSlot"
+QT_MOC_LITERAL(2, 25, 0), // ""
+QT_MOC_LITERAL(3, 26, 8), // "playSlot"
+QT_MOC_LITERAL(4, 35, 9), // "pauseSlot"
+QT_MOC_LITERAL(5, 45, 8), // "stepSlot"
+QT_MOC_LITERAL(6, 54, 12) // "timeLineSlot"
 
     },
-    "CQLottie\0loadSlot\0\0playSlot\0pauseSlot\0"
-    "stepSlot\0tickSlot"
+    "CQLottieToolBar\0loadSlot\0\0playSlot\0"
+    "pauseSlot\0stepSlot\0timeLineSlot"
 };
 #undef QT_MOC_LITERAL
 
-static const uint qt_meta_data_CQLottie[] = {
+static const uint qt_meta_data_CQLottieToolBar[] = {
 
  // content:
        8,       // revision
@@ -60,10 +60,10 @@ static const uint qt_meta_data_CQLottie[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags
-       1,    0,   39,    2, 0x0a /* Public */,
-       3,    0,   40,    2, 0x0a /* Public */,
-       4,    0,   41,    2, 0x0a /* Public */,
-       5,    0,   42,    2, 0x0a /* Public */,
+       1,    0,   39,    2, 0x08 /* Private */,
+       3,    0,   40,    2, 0x08 /* Private */,
+       4,    0,   41,    2, 0x08 /* Private */,
+       5,    0,   42,    2, 0x08 /* Private */,
        6,    0,   43,    2, 0x08 /* Private */,
 
  // slots: parameters
@@ -76,49 +76,49 @@ static const uint qt_meta_data_CQLottie[] = {
        0        // eod
 };
 
-void CQLottie::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
+void CQLottieToolBar::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
 {
     if (_c == QMetaObject::InvokeMetaMethod) {
-        auto *_t = static_cast<CQLottie *>(_o);
+        auto *_t = static_cast<CQLottieToolBar *>(_o);
         (void)_t;
         switch (_id) {
         case 0: _t->loadSlot(); break;
         case 1: _t->playSlot(); break;
         case 2: _t->pauseSlot(); break;
         case 3: _t->stepSlot(); break;
-        case 4: _t->tickSlot(); break;
+        case 4: _t->timeLineSlot(); break;
         default: ;
         }
     }
     (void)_a;
 }
 
-QT_INIT_METAOBJECT const QMetaObject CQLottie::staticMetaObject = { {
-    QMetaObject::SuperData::link<QWidget::staticMetaObject>(),
-    qt_meta_stringdata_CQLottie.data,
-    qt_meta_data_CQLottie,
+QT_INIT_METAOBJECT const QMetaObject CQLottieToolBar::staticMetaObject = { {
+    QMetaObject::SuperData::link<QFrame::staticMetaObject>(),
+    qt_meta_stringdata_CQLottieToolBar.data,
+    qt_meta_data_CQLottieToolBar,
     qt_static_metacall,
     nullptr,
     nullptr
 } };
 
 
-const QMetaObject *CQLottie::metaObject() const
+const QMetaObject *CQLottieToolBar::metaObject() const
 {
     return QObject::d_ptr->metaObject ? QObject::d_ptr->dynamicMetaObject() : &staticMetaObject;
 }
 
-void *CQLottie::qt_metacast(const char *_clname)
+void *CQLottieToolBar::qt_metacast(const char *_clname)
 {
     if (!_clname) return nullptr;
-    if (!strcmp(_clname, qt_meta_stringdata_CQLottie.stringdata0))
+    if (!strcmp(_clname, qt_meta_stringdata_CQLottieToolBar.stringdata0))
         return static_cast<void*>(this);
-    return QWidget::qt_metacast(_clname);
+    return QFrame::qt_metacast(_clname);
 }
 
-int CQLottie::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
+int CQLottieToolBar::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
 {
-    _id = QWidget::qt_metacall(_c, _id, _a);
+    _id = QFrame::qt_metacall(_c, _id, _a);
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
