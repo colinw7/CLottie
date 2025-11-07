@@ -121,15 +121,52 @@ load(const std::string &file)
   if (! readRoot("root", value))
     return errorMsg("", "readRoot");
 
-  root_->buildLayerHier();
+  buildLayerHier();
+  printLayerHier();
 
   if (isPrint()) {
-    root_->printLayerHier();
+    printLayerHier();
 
-    root_->printHier();
+    printHier();
   }
 
   return true;
+}
+
+void
+CLottie::
+buildLayerHier()
+{
+  for (auto *layer : layers_) {
+    auto *player = layer->getParentLayer();
+
+    if (! player) {
+      auto *passet = layer->getParentAsset();
+
+      if (passet)
+        passet->addChildLayer(layer);
+      else
+        root_->addChildLayer(layer);
+
+      continue;
+    }
+
+    player->addChildLayer(layer);
+  }
+}
+
+void
+CLottie::
+printLayerHier() const
+{
+  root_->printLayerHier();
+}
+
+void
+CLottie::
+printHier() const
+{
+  root_->printHier();
 }
 
 CLottieAsset *
@@ -137,7 +174,11 @@ CLottie::
 getAssetById(const std::string &id) const
 {
   auto pa = assetIds_.find(id);
-  if (pa == assetIds_.end()) return nullptr;
+
+  if (pa == assetIds_.end()) {
+    std::cerr << "Failed to find asset id : " << id << "\n";
+    return nullptr;
+  }
 
   return (*pa).second;
 }
@@ -147,7 +188,11 @@ CLottie::
 getLayerById(int id) const
 {
   auto pl = layerIds_.find(id);
-  if (pl == layerIds_.end()) return nullptr;
+
+  if (pl == layerIds_.end()) {
+    std::cerr << "Failed to find layer id : " << id << "\n";
+    return nullptr;
+  }
 
   return (*pl).second;
 }
@@ -645,16 +690,22 @@ addLayer(CLottieLayer *layer)
 {
   root_->addLayer(layer);
 
-  if (layer->ind()) {
-    auto ind = layer->ind().value();
+  if (layer->ind())
+    addLayerId(layer);
+}
 
-    auto pl = layerIds_.find(ind);
+void
+CLottie::
+addLayerId(CLottieLayer *layer)
+{
+  auto ind = layer->ind().value();
 
-    if (pl != layerIds_.end())
-      std::cerr << "Duplicate layer ind " << ind << "\n";
+  auto pl = layerIds_.find(ind);
 
-    layerIds_[ind] = layer;
-  }
+  if (pl != layerIds_.end())
+    std::cerr << "Duplicate layer ind " << ind << "\n";
+
+  layerIds_[ind] = layer;
 }
 
 bool
@@ -3296,10 +3347,15 @@ valueToBool(const CJson::ValueP &value, bool def) const
   return (valueToReal(value) != 0.0);
 }
 
-CMatrix2D
+CMatrixStack2D
 CLottie::
 getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) const
 {
+  CMatrixStack2D m;
+
+  if (! transform)
+    return m;
+
   // Translate by −a
   // Scale by s/100
   // If sk != 0:
@@ -3308,9 +3364,6 @@ getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) co
   //   Rotate by sa
   // Rotate by −r
   // Translate by p
-
-  if (! transform)
-    return CMatrix2D::identity();
 
   // TODO: autoOrient adds frame angle ?
 
@@ -3321,18 +3374,23 @@ getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) co
   auto r = transform->rotation.tvalue(timeFrame, 0).value();
   auto p = transform->position.tvalue(timeFrame, CPoint2D(0, 0)).value();
 
-  auto m1 = CMatrix2D::translation(-ap.x, -ap.y);
-  auto m2 = CMatrix2D::scale(s.x/100.0, s.y/100.0);
-  auto m3 = CMatrix2D::rotation(CMathGen::DegToRad(r));
-  auto m4 = CMatrix2D::translation(p.x, p.y);
+  auto m1 = CMatrixStack2D::translation(-ap.x, -ap.y);
+  auto m2 = CMatrixStack2D::scale(s.x/100.0, s.y/100.0);
+  auto m3 = CMatrixStack2D::rotation(CMathGen::DegToRad(r));
+  auto m4 = CMatrixStack2D::translation(p.x, p.y);
 
-  return m4*m3*m2*m1;
+  return m.append(m4).append(m3).append(m2).append(m1);
 }
 
-CMatrix2D
+CMatrixStack2D
 CLottie::
 getRepeaterMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform, double f) const
 {
+  CMatrixStack2D m;
+
+  if (! transform)
+    return m;
+
   auto apxy = transform->anchorPoint.tvalue(timeFrame, CPoint2D(0, 0)).value();
   auto ap   = (apxy.isSet() ? CPoint2D(apxy.xvals[0], apxy.yvals[0]) : CPoint2D(0, 0));
 
@@ -3340,13 +3398,13 @@ getRepeaterMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform, dou
   auto r = transform->rotation.tvalue(timeFrame, 0).value();
   auto p = transform->position.tvalue(timeFrame, CPoint2D(0, 0)).value();
 
-  auto m1 = CMatrix2D::translation(-ap.x, -ap.y);
-  auto m2 = CMatrix2D::rotation(CMathGen::DegToRad(r)*f); // additive
-  auto m3 = CMatrix2D::scale(std::pow(s.x/100.0, f), std::pow(s.y/100.0, f)); // multiplicative
-  auto m4 = CMatrix2D::translation(ap.x, ap.y);
-  auto m5 = CMatrix2D::translation(p.x*f, p.y*f);  // additive
+  auto m1 = CMatrixStack2D::translation(-ap.x, -ap.y);
+  auto m2 = CMatrixStack2D::rotation(CMathGen::DegToRad(r)*f); // additive
+  auto m3 = CMatrixStack2D::scale(std::pow(s.x/100.0, f), std::pow(s.y/100.0, f)); // multiplicative
+  auto m4 = CMatrixStack2D::translation(ap.x, ap.y);
+  auto m5 = CMatrixStack2D::translation(p.x*f, p.y*f);  // additive
 
-  return m5*m4*m3*m2*m1;
+  return m.append(m5).append(m4).append(m3).append(m2).append(m1);
 }
 
 CLottieRoot *
@@ -3420,6 +3478,7 @@ CLottieRoot::
 {
 }
 
+#if 0
 void
 CLottieRoot::
 buildLayerHier()
@@ -3435,15 +3494,24 @@ buildLayerHier()
     player->addChildLayer(layer);
   }
 }
+#endif
 
 void
 CLottieRoot::
 printLayerHier() const
 {
-  for (auto *layer : childLayers_) {
+  for (auto *layer : childLayers()) {
     std::cerr << layer->name().value_or("") << "\n";
 
     layer->printLayerHier("  ");
+  }
+
+  for (auto *asset : assets_) {
+    for (auto *layer : asset->childLayers()) {
+      std::cerr << layer->name().value_or("") << "\n";
+
+      layer->printLayerHier("  ");
+    }
   }
 }
 
@@ -3524,6 +3592,15 @@ getRoot() const
 
 void
 CLottieAsset::
+addLayer(CLottieLayer *layer)
+{
+  layers_.push_back(layer);
+
+  lottie_->addLayerId(layer);
+}
+
+void
+CLottieAsset::
 printI(const std::string &prefix, bool hier) const
 {
   CLottieObject::printI(prefix, hier);
@@ -3591,17 +3668,17 @@ getRoot() const
   return (layer ? layer->getRoot() : nullptr);
 }
 
-CMatrix2D
+CMatrixStack2D
 CLottieLayer::
 calcTransform(const TimeFrame &timeFrame) const
 {
   if (! transform_)
-    return CMatrix2D::identity();
+    return CMatrixStack2D();
 
   return lottie_->getTransformMatrix(timeFrame, transform_);
 }
 
-CMatrix2D
+CMatrixStack2D
 CLottieLayer::
 calcHierTransform(const TimeFrame &timeFrame) const
 {
@@ -3610,7 +3687,7 @@ calcHierTransform(const TimeFrame &timeFrame) const
   auto *player = getParentLayer();
 
   if (player)
-    m = player->calcHierTransform(timeFrame)*m;
+    m = player->calcHierTransform(timeFrame).append(m);
 
   return m;
 }
@@ -3926,18 +4003,18 @@ getParentShape() const
 
 //---
 
-CMatrix2D
+CMatrixStack2D
 CLottieShape::
 calcTransform(const TimeFrame &timeFrame) const
 {
   if (! transform_)
-    return CMatrix2D::identity();
+    return CMatrixStack2D();
 
   return lottie_->getTransformMatrix(timeFrame, transform_);
 }
 
 #if 0
-CMatrix2D
+CMatrixStack2D
 CLottieShape::
 calcHierTransform(const TimeFrame &timeFrame) const
 {
@@ -3947,15 +4024,15 @@ calcHierTransform(const TimeFrame &timeFrame) const
   auto *player = getParentLayer();
 
   if      (pshape)
-    m = pshape->calcHierTransform(timeFrame)*m;
+    m = pshape->calcHierTransform(timeFrame).append(m);
   else if (player)
-    m = player->calcHierTransform(timeFrame)*m;
+    m = player->calcHierTransform(timeFrame).append(m);
 
   return m;
 }
 #endif
 
-CMatrix2D
+CMatrixStack2D
 CLottieShape::
 calcHierTransform(const TimeFrame &timeFrame) const
 {
@@ -3967,7 +4044,7 @@ calcHierTransform(const TimeFrame &timeFrame) const
   if (pshape)
     transformShape = pshape->getTransformShape();
 
-  CMatrix2D m;
+  CMatrixStack2D m;
 
   if (transformShape)
     m = transformShape->calcTransform(timeFrame);
@@ -3975,9 +4052,9 @@ calcHierTransform(const TimeFrame &timeFrame) const
     m = calcTransform(timeFrame);
 
   if      (pshape)
-    m = pshape->calcHierTransform(timeFrame)*m;
+    m = pshape->calcHierTransform(timeFrame).append(m);
   else if (player)
-    m = player->calcHierTransform(timeFrame)*m;
+    m = player->calcHierTransform(timeFrame).append(m);
 
   return m;
 }
@@ -4076,7 +4153,7 @@ CLottieShape *
 CLottieShape::
 calcHierMergeShape() const
 {
-  if (type() == "mm" && ! hidden().value_or(false))
+  if (type() == "mm" && ! isHidden().value_or(false))
     return const_cast<CLottieShape*>(this);
 
   auto *pshape = getParentShape();
@@ -4095,7 +4172,7 @@ CLottieShape::
 getMergeShape() const
 {
   for (auto *shape : shapes()) {
-    if (shape->type() == "mm" && ! shape->hidden().value_or(false))
+    if (shape->type() == "mm" && ! shape->isHidden().value_or(false))
       return shape;
   }
 
@@ -4225,7 +4302,7 @@ printI(const std::string &prefix, bool /*hier*/) const
 
   printValue(prefix, "selected", selected_);
 
-  optPrintValue(prefix, "hidden", hidden_);
+  optPrintValue(prefix, "hidden", isHidden());
 
   optPrintValue(prefix, "ind", ind_);
 }

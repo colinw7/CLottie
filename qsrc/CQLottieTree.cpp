@@ -2,8 +2,10 @@
 #include <CQLottieCanvas.h>
 #include <CQLottieTimeLine.h>
 
+#include <CQMatrixStack2D.h>
 #include <CQRealSpin.h>
 #include <CQColorChooser.h>
+#include <CQLabelImage.h>
 
 #include <QPushButton>
 #include <QLineEdit>
@@ -23,6 +25,30 @@ QColor toQColor(const CRGBA &color) {
 
 CRGBA toRGBA(const QColor &color) {
   return CRGBA(color.redF(), color.greenF(), color.blueF(), color.alphaF());
+}
+
+void showMatrixStack(const CMatrixStack2D &m) {
+  static CQMatrixStack2D *s_matrixStack;
+
+  if (! s_matrixStack)
+    s_matrixStack = new CQMatrixStack2D;
+
+  s_matrixStack->setMatrixStack(m);
+
+  s_matrixStack->show();
+  s_matrixStack->raise();
+}
+
+void showImage(const QImage &image) {
+  static CQLabelImage *s_imageView;
+
+  if (! s_imageView)
+    s_imageView = new CQLabelImage;
+
+  s_imageView->setImage(image);
+
+  s_imageView->show();
+  s_imageView->raise();
 }
 
 }
@@ -74,17 +100,20 @@ CQLottieTree(CQLottie *lottie) :
   auto *bboxButton          = new QPushButton("BBox");
   auto *transformButton     = new QPushButton("Transform");
   auto *hierTransformButton = new QPushButton("Hier Transform");
+  auto *imageButton         = new QPushButton("Image");
   auto *printButton         = new QPushButton("Print");
 
   connect(bboxButton, SIGNAL(clicked()), this, SLOT(bboxSlot()));
   connect(transformButton, SIGNAL(clicked()), this, SLOT(transformSlot()));
   connect(hierTransformButton, SIGNAL(clicked()), this, SLOT(hierTransformSlot()));
+  connect(imageButton, SIGNAL(clicked()), this, SLOT(imageSlot()));
   connect(printButton, SIGNAL(clicked()), this, SLOT(printSlot()));
 
   controlLayout->addStretch(1);
   controlLayout->addWidget(bboxButton);
   controlLayout->addWidget(transformButton);
   controlLayout->addWidget(hierTransformButton);
+  controlLayout->addWidget(imageButton);
   controlLayout->addWidget(printButton);
 
   //---
@@ -182,15 +211,15 @@ createLayerItem(CLottieLayer *layer)
 
   auto name = QString::fromStdString(layer->name().value_or(""));
 
-  auto *parentAsset = layer->getParentAsset();
   auto *parentLayer = layer->getParentLayer();
+  auto *parentAsset = layer->getParentAsset();
 
   QTreeWidgetItem *parentItem { nullptr };
 
-  if      (parentAsset)
-    parentItem = createAssetItem(parentAsset);
-  else if (parentLayer)
+  if      (parentLayer)
     parentItem = createLayerItem(parentLayer);
+  else if (parentAsset)
+    parentItem = createAssetItem(parentAsset);
   else
     parentItem = rootItem_;
 
@@ -250,7 +279,7 @@ createAssetItem(CLottieAsset *asset)
 
   //---
 
-  for (auto *layer : asset->layers()) {
+  for (auto *layer : asset->childLayers()) {
     auto *item = createLayerItem(layer);
 
     item->setData(0, Qt::UserRole, layer->ind().value_or(-1));
@@ -464,6 +493,23 @@ collapseAll(const QModelIndex &ind)
 
 void
 CQLottieTree::
+imageSlot()
+{
+  auto selectedItems = tree_->selectedItems();
+
+  for (auto *item : selectedItems) {
+    auto *layerItem = dynamic_cast<CQLottieTreeLayerItem *>(item);
+    if (! layerItem) continue;
+
+    auto *qlayer = dynamic_cast<CQLottieLayer *>(layerItem->layer());
+
+    if (qlayer)
+      showImage(qlayer->image());
+  }
+}
+
+void
+CQLottieTree::
 printSlot()
 {
   auto selectedItems = tree_->selectedItems();
@@ -512,6 +558,8 @@ transformSlot()
     auto m = obj->calcTransform(timeFrame);
 
     std::cerr << m << "\n";
+
+    showMatrixStack(m);
   }
 }
 
@@ -533,6 +581,8 @@ hierTransformSlot()
     auto m = obj->calcHierTransform(timeFrame);
 
     std::cerr << m << "\n";
+
+    showMatrixStack(m);
   }
 }
 
@@ -1360,14 +1410,14 @@ load()
 
     if (shape->polyStar()) {
       std::vector<PropName> starPropNames = {
-        { "polystar.type"          , CQLottieTreeValueItem::Type::INTEGER },
+        { "polystar.type"          , CQLottieTreeValueItem::Type::INTEGER  },
         { "polystar.position"      , CQLottieTreeValueItem::Type::POSITION },
-        { "polystar.innerRadius"   , CQLottieTreeValueItem::Type::SCALAR },
-        { "polystar.innerRoundness", CQLottieTreeValueItem::Type::SCALAR },
-        { "polystar.outerRadius"   , CQLottieTreeValueItem::Type::SCALAR },
-        { "polystar.outerRoundness", CQLottieTreeValueItem::Type::SCALAR },
-        { "polystar.rotation"      , CQLottieTreeValueItem::Type::SCALAR },
-        { "polystar.points"        , CQLottieTreeValueItem::Type::SCALAR },
+        { "polystar.innerRadius"   , CQLottieTreeValueItem::Type::SCALAR   },
+        { "polystar.innerRoundness", CQLottieTreeValueItem::Type::SCALAR   },
+        { "polystar.outerRadius"   , CQLottieTreeValueItem::Type::SCALAR   },
+        { "polystar.outerRoundness", CQLottieTreeValueItem::Type::SCALAR   },
+        { "polystar.rotation"      , CQLottieTreeValueItem::Type::SCALAR   },
+        { "polystar.points"        , CQLottieTreeValueItem::Type::SCALAR   },
       };
 
       for (const auto &propName : starPropNames) {
@@ -1444,7 +1494,7 @@ itemClickedSlot(QTreeWidgetItem *item, int column)
 
   if (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
     if (valueItem->propName() == "hidden") {
-      object->setHidden(! object->hidden().value_or(false));
+      object->setHidden(! object->isHidden().value_or(false));
 
       lottie_->canvas()->invalidate();
     }
@@ -1604,6 +1654,8 @@ createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &i
   auto *valueItem = dynamic_cast<CQLottieTreeValueItem *>(item);
   if (! valueItem) return nullptr;
 
+  auto *prop = valueItem->property();
+
   QWidget *w { nullptr };
 
   if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
@@ -1634,6 +1686,11 @@ createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &i
     w = edit;
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
+    if (! prop) {
+      std::cerr << "Failed to edit '" << valueItem->propName().toStdString() << "'\n";
+      return nullptr;
+    }
+
     auto *chooser = new CQColorChooser(parent);
 
     chooser->setAutoFillBackground(true);
@@ -1643,6 +1700,15 @@ createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &i
     connect(chooser, SIGNAL(colorChanged(const QColor&)), this, SLOT(updateValue()));
 
     w = chooser;
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
+    auto *edit = new CQRealSpin(parent);
+
+    edit->setAutoFillBackground(true);
+
+    connect(edit, SIGNAL(editingFinished()), this, SLOT(updateValue()));
+
+    w = edit;
   }
 
   if (! w)
@@ -1681,11 +1747,22 @@ setEditorData(QWidget *w, const QModelIndex &index) const
   auto *layer  = (layerItem ? layerItem->layer() : nullptr);
   auto *shape  = (shapeItem ? shapeItem->shape() : nullptr);
 
+  auto *prop = valueItem->property();
+
+  //---
+
+  auto *lottie = tree_->lottie();
+
+  CLottieUtil::TimeFrame timeFrame;
+  lottie->getTimeFrame(timeFrame);
+
+  //---
+
   if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
     auto *check = qobject_cast<QCheckBox *>(w);
 
     if (valueItem->propName() == "hidden")
-      check->setChecked(object->hidden().value_or(false));
+      check->setChecked(object->isHidden().value_or(false));
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
   }
@@ -1702,13 +1779,38 @@ setEditorData(QWidget *w, const QModelIndex &index) const
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
     auto *chooser = qobject_cast<CQColorChooser *>(w);
 
-    if (valueItem->propName() == "color") {
-      if (shape) {
-        auto c = shape->color().value(CRGBA(0, 0, 0, 0)).value();
+    std::optional<CRGBA> c;
 
-        chooser->setColor(toQColor(c));
-      }
+    if (prop) {
+      auto str = prop->tvalueStr(timeFrame);
+
+      CRGBA c1;
+      if (CRGBName::toRGBA(str, c1))
+        c = c1;
     }
+
+    if (valueItem->propName() == "color") {
+      if (shape)
+        c = shape->color().value(CRGBA(0, 0, 0, 0)).value();
+    }
+
+    if (c)
+      chooser->setColor(toQColor(c.value()));
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
+    auto *edit = qobject_cast<CQRealSpin *>(w);
+
+    if (! prop) {
+      std::cerr << "Failed to set edit for '" << valueItem->propName().toStdString() << "'\n";
+      return;
+    }
+
+    auto str = prop->tvalueStr(timeFrame);
+
+    double r;
+    CStrUtil::toReal(str, &r);
+
+    edit->setValue(r);
   }
 }
 
@@ -1733,6 +1835,8 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
   auto *layer  = (layerItem ? layerItem->layer() : nullptr);
   auto *shape  = (shapeItem ? shapeItem->shape() : nullptr);
 
+  auto *prop = valueItem->property();
+
   if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
     auto *check = qobject_cast<QCheckBox *>(w);
 
@@ -1741,10 +1845,14 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
 
       lottie->canvas()->invalidate();
     }
+    else
+      std::cerr << "Failed to set bool\n";
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
+    std::cerr << "Failed to set integer\n";
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
+    std::cerr << "Failed to set real\n";
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
     auto *edit = qobject_cast<QLineEdit *>(w);
@@ -1753,14 +1861,42 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
       if (layer)
         layer->setRefId(edit->text().toStdString());
     }
+    else
+      std::cerr << "Failed to set string\n";
+
+    lottie->canvas()->invalidate();
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
     auto *chooser = qobject_cast<CQColorChooser *>(w);
 
+    auto c = toRGBA(chooser->color());
+
     if (valueItem->propName() == "color") {
       if (shape)
-        shape->colorRef().setValue(toRGBA(chooser->color()));
+        shape->colorRef().setValue(c);
     }
+
+    if (prop) {
+      if (! prop->setValueStr(c.stringEncode()))
+        std::cerr << "Failed to set color for '" << valueItem->propName().toStdString() << "'\n";
+    }
+
+    lottie->canvas()->invalidate();
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
+    auto *edit = qobject_cast<CQRealSpin *>(w);
+
+    if (! prop) {
+      std::cerr << "Failed to get edit for '" << valueItem->propName().toStdString() << "'\n";
+      return;
+    }
+
+    auto str = std::to_string(edit->value());
+
+    if (! prop->setValueStr(str))
+      std::cerr << "Failed to set scalar for '" << valueItem->propName().toStdString() << "'\n";
+
+    lottie->canvas()->invalidate();
   }
 }
 
@@ -1849,7 +1985,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     std::optional<bool> b;
 
     if (valueItem->propName() == "hidden") {
-      b = object->hidden().value_or(false);
+      b = object->isHidden().value_or(false);
     }
     else {
       if      (layer) {
@@ -2027,6 +2163,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
         else if (valueItem->propName() == "repeater.composite") {
           if (shape->repeater() && shape->repeater()->composite)
             i = shape->repeater()->composite.value();
+        }
+        else if (valueItem->propName() == "polystar.type") {
+          if (shape->polyStar() && shape->polyStar()->type)
+            i = shape->polyStar()->type.value();
         }
       }
       else if (effect) {
@@ -2277,6 +2417,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
             shape->repeater()->transform->anchorPoint.isSet())
           xy = shape->repeater()->transform->anchorPoint.tvalue(timeFrame);
       }
+      else if (valueItem->propName() == "polystar.position") {
+        if (shape->polyStar() && shape->polyStar()->position.isSet())
+          xy = shape->polyStar()->position.tvalue(timeFrame);
+      }
     }
 
     if (xy) {
@@ -2510,6 +2654,30 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
       else if (valueItem->propName() == "rounded.roundness") {
         if (shape->rounded() && shape->rounded()->roundness.isSet())
           r = shape->rounded()->roundness.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.innerRadius") {
+        if (shape->polyStar() && shape->polyStar()->innerRadius.isSet())
+          r = shape->polyStar()->innerRadius.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.innerRoundness") {
+        if (shape->polyStar() && shape->polyStar()->innerRoundness.isSet())
+          r = shape->polyStar()->innerRoundness.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.outerRadius") {
+        if (shape->polyStar() && shape->polyStar()->outerRadius.isSet())
+          r = shape->polyStar()->outerRadius.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.outerRoundness") {
+        if (shape->polyStar() && shape->polyStar()->outerRoundness.isSet())
+          r = shape->polyStar()->outerRoundness.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.rotation") {
+        if (shape->polyStar() && shape->polyStar()->rotation.isSet())
+          r = shape->polyStar()->rotation.tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "polystar.points") {
+        if (shape->polyStar() && shape->polyStar()->points.isSet())
+          r = shape->polyStar()->points.tvalue(timeFrame);
       }
     }
 

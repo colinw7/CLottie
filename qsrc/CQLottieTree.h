@@ -55,6 +55,7 @@ class CQLottieTree : public QFrame {
   void bboxSlot();
   void transformSlot();
   void hierTransformSlot();
+  void imageSlot();
   void printSlot();
 
  private:
@@ -211,7 +212,7 @@ class CQLottieTreeValueItem : public QTreeWidgetItem {
 
   CLottieObject *object() const { return object_; }
 
-  const CLottieProperty *property() const { return property_; }
+  CLottieProperty *property() const { return property_; }
   void setProperty(CLottieProperty *p) { property_ = p; }
 
  protected:

@@ -22,6 +22,7 @@ CPPFLAGS = \
 -I../../CJson/include \
 -I../../CMath/include \
 -I../../CUtil/include \
+-I../../CStrUtil/include \
 -I../../COS/include \
 
 clean:

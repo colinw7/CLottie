@@ -96,7 +96,7 @@ QPainterPath toQPath(const CBezierPath &bezierPath) {
   return path;
 }
 
-CBBox2D transformBBox(const CMatrix2D &m, const CBBox2D &bbox) {
+CBBox2D transformBBox(const CMatrixStack2D &m, const CBBox2D &bbox) {
   if (bbox.isSet()) {
     CPoint2D p1, p2, p3, p4;
 
@@ -452,12 +452,17 @@ void
 CQLottie::
 drawRoot(const DrawState &drawState, const CLottieRoot *root, bool update)
 {
-  if (root->hidden().value_or(false))
+  if (root->isHidden().value_or(false))
     return;
 
-  auto bbox = root->bbox();
+  //---
 
-  drawChildLayers(drawState, root->childLayers(), update);
+  if (! root->childLayers().empty())
+    drawChildLayers(drawState, root->childLayers(), update);
+
+  //---
+
+  auto bbox = root->bbox();
 
   for (auto *layer : root->childLayers())
     bbox += layer->bbox();
@@ -473,6 +478,7 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
     if (update) {
       for (auto *layer : childLayers) {
         auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+        if (qlayer->isHidden().value_or(false)) continue;
 
         qlayer->setDoubleBuffer(true);
 
@@ -482,6 +488,7 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
 
     for (auto it = childLayers.rbegin(); it != childLayers.rend(); ++it) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+      if (qlayer->isHidden().value_or(false)) continue;
 
       if (qlayer->isEnabled() && qlayer->isChanged()) {
         drawState.painter->drawImage(0, 0, qlayer->image());
@@ -491,43 +498,74 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
     }
   }
   else {
-    CQLottieLayer *matteLayer = nullptr;
+    // assign matte layers
+    CQLottieLayer *matteTarget = nullptr;
 
     for (auto *layer : childLayers) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+      if (qlayer->isHidden().value_or(false)) continue;
 
-      if (qlayer->matteTarget()) {
-        qlayer->setDoubleBuffer(true);
+      qlayer->setMatteTargetLayer(nullptr);
+      qlayer->setMatteModeLayer  (nullptr);
 
-        drawLayer(drawState, qlayer, update);
-
-        matteLayer = qlayer;
-
+      if      (qlayer->matteTarget()) {
+        matteTarget = qlayer;
         continue;
       }
+      else if (qlayer->matteMode()) {
+        if (matteTarget) {
+          qlayer     ->setMatteTargetLayer(matteTarget);
+          matteTarget->setMatteModeLayer  (qlayer);
+        }
+        else
+          std::cerr << "Matte mode layer with no target\n";
 
-      if (qlayer->matteMode()) {
+        matteTarget = nullptr;
+      }
+      else {
+        if (matteTarget)
+          std::cerr << "Non-Matte mode layer with target\n";
+
+        matteTarget = nullptr;
+      }
+    }
+
+    // draw matte layers
+    for (auto *layer : childLayers) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+      if (qlayer->isHidden().value_or(false)) continue;
+
+      if (qlayer->matteTargetLayer() || qlayer->matteModeLayer()) {
         qlayer->setDoubleBuffer(true);
 
         drawLayer(drawState, qlayer, update);
-
-        qlayer->setMatteLayer(matteLayer);
       }
-
-      matteLayer = nullptr;
     }
 
+    // draw non-matte layers and composed matte mode layer
     for (auto it = childLayers.rbegin(); it != childLayers.rend(); ++it) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
+      if (qlayer->isHidden().value_or(false)) continue;
 
       if (qlayer->matteTarget())
         continue;
 
       if (qlayer->matteMode()) {
-        if (qlayer->matteLayer()) {
-          auto matteImage = matteLayerImage(qlayer, qlayer->matteLayer());
+        if (qlayer->matteTargetLayer()) {
+          auto matteImage =
+            matteLayerImage(qlayer, qlayer->matteTargetLayer(), *qlayer->matteMode());
+
+//        auto pmatrix = drawState.getDisplayMatrix();
+//        auto smatrix = getLayerMatrix(drawState, qlayer);
+
+//        auto dmatrix = pmatrix*smatrix.getMatrix();
+
+//        drawState.painter->save();
+//        drawState.painter->setTransform(toQTransform(pmatrix));
 
           drawState.painter->drawImage(0, 0, matteImage);
+
+//        drawState.painter->restore();
         }
       }
       else {
@@ -539,8 +577,15 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
 
 QImage
 CQLottie::
-matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer) const
+matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int /*matteMode*/) const
 {
+  // Matte Mode
+  //  0 : Normal
+  //  1 : Alpha
+  //  2 : Inverted Alpha
+  //  3 : Luminance
+  //  4 : Inverted Luminance
+
   int iw = layer->image().width ();
   int ih = layer->image().height();
 
@@ -593,7 +638,7 @@ void
 CQLottie::
 drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 {
-  if (layer->hidden().value_or(false))
+  if (layer->isHidden().value_or(false))
     return;
 
   int frame = int(drawState.timeFrame.frame) + drawState.frameDelta;
@@ -626,6 +671,8 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
     drawState1.painter = qlayer->painter();
     drawState1.layer   = qlayer;
 
+    qlayer->clear();
+
     qlayer->setChanged(false);
   }
 
@@ -656,7 +703,8 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
   drawLayerAssets(drawState.painter, drawState1, layer);
 #endif
 
-  drawChildLayers(drawState1, layer->childLayers(), update);
+  if (! layer->childLayers().empty())
+    drawChildLayers(drawState1, layer->childLayers(), update);
 
   //---
 
@@ -673,6 +721,8 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
   //---
 
   if (isShowBBox() && layer->isHierSelected() && layer->bbox().isSet()) {
+    drawState.painter->save();
+
     auto displayMatrix = drawState.getDisplayMatrix();
 
     drawState.painter->setTransform(toQTransform(displayMatrix));
@@ -680,6 +730,8 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
     setBBoxPenBrush(drawState.painter);
 
     drawState.painter->drawRect(toQRect(layer->bbox()));
+
+    drawState.painter->restore();
   }
 }
 
@@ -838,7 +890,7 @@ drawMergeShapes(DrawState &drawState)
   auto pmatrix = drawState.getDisplayMatrix();
   auto smatrix = getShapeMatrix(drawState, drawState.merge->shape);
 
-  auto dmatrix = pmatrix*smatrix;
+  auto dmatrix = pmatrix*smatrix.getMatrix();
 
   auto pbbox = toBBox(path.boundingRect());
 
@@ -866,9 +918,6 @@ drawMergeShapes(DrawState &drawState)
 
   if (drawState.layer)
     drawState.layer->setChanged(true);
-
-  //---
-
 }
 
 #if 0
@@ -896,7 +945,7 @@ void
 CQLottie::
 drawAsset(const DrawState &drawState, CLottieAsset *asset)
 {
-  if (asset->layers().empty())
+  if (asset->childLayers().empty())
     return;
 
   //---
@@ -909,8 +958,12 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
 
   bool update = false;
 
+#if 1
+  if (! asset->childLayers().empty())
+    drawChildLayers(drawState, asset->childLayers(), update);
+#else
   if (isDoubleBuffer()) {
-    for (auto *layer : asset->layers()) {
+    for (auto *layer : asset->childLayers()) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
 
       qlayer->setDoubleBuffer(true);
@@ -918,7 +971,7 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
       drawLayer(drawState1, layer, update);
     }
 
-    for (auto it = asset->layers().rbegin(); it != asset->layers().rend(); ++it) {
+    for (auto it = asset->childLayers().rbegin(); it != asset->childLayers().rend(); ++it) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
 
       if (qlayer->isEnabled() && qlayer->isChanged()) {
@@ -929,18 +982,19 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
     }
   }
   else {
-    for (auto it = asset->layers().rbegin(); it != asset->layers().rend(); ++it) {
+    for (auto it = asset->childLayers().rbegin(); it != asset->childLayers().rend(); ++it) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(*it);
 
       drawLayer(drawState1, qlayer, update);
     }
   }
+#endif
 
   //---
 
   CBBox2D bbox;
 
-  for (auto *layer : asset->layers())
+  for (auto *layer : asset->childLayers())
     bbox += layer->bbox();
 
   const_cast<CLottieAsset *>(asset)->setBBox(bbox);
@@ -948,6 +1002,8 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
   //---
 
   if (isShowBBox() && asset->isHierSelected() && asset->bbox().isSet()) {
+    drawState.painter->save();
+
     auto displayMatrix = drawState.getDisplayMatrix();
 
     drawState.painter->setTransform(toQTransform(displayMatrix));
@@ -955,6 +1011,8 @@ drawAsset(const DrawState &drawState, CLottieAsset *asset)
     setBBoxPenBrush(drawState.painter);
 
     drawState.painter->drawRect(toQRect(asset->bbox()));
+
+    drawState.painter->restore();
   }
 }
 
@@ -1041,7 +1099,7 @@ drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
 
   drawState.painter->save();
 
-  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix;
+  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix.getMatrix();
 
   drawState.painter->setTransform(toQTransform(pmatrix));
 
@@ -1142,7 +1200,7 @@ drawImageLayer(const DrawState &drawState, const CLottieLayer *layer)
 
   drawState.painter->save();
 
-  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix;
+  auto pmatrix = drawState.getDisplayMatrix()*drawState.matrix.getMatrix();
 
   drawState.painter->setTransform(toQTransform(pmatrix));
 
@@ -1158,7 +1216,7 @@ void
 CQLottie::
 drawShape(DrawState &drawState, CLottieShape *shape)
 {
-  if (shape->hidden().value_or(false))
+  if (shape->isHidden().value_or(false))
     return;
 
   //---
@@ -1499,7 +1557,7 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
   auto pmatrix = drawState.getDisplayMatrix();
   auto smatrix = getShapeMatrix(drawState, shape);
 
-  auto dmatrix = pmatrix*smatrix;
+  auto dmatrix = pmatrix*smatrix.getMatrix();
 
   drawState.painter->setTransform(toQTransform(dmatrix));
 
@@ -1529,7 +1587,13 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
     drawState.painter->drawPath(path);
   }
 
+  drawState.painter->restore();
+
+  //---
+
   if (isShowBBox() && shape->isHierSelected() && shape->bbox().isSet()) {
+    drawState.painter->save();
+
     auto displayMatrix = pmatrix;
 
     drawState.painter->setTransform(toQTransform(displayMatrix));
@@ -1537,11 +1601,11 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
     setBBoxPenBrush(drawState.painter);
 
     drawState.painter->drawRect(toQRect(shape->bbox()));
+
+    drawState.painter->restore();
   }
 
   //---
-
-  drawState.painter->restore();
 
   if (drawState.layer)
     drawState.layer->setChanged(true);
@@ -1828,7 +1892,7 @@ mouseMove(const QPoint &pos)
 
 //---
 
-CMatrix2D
+CMatrixStack2D
 CQLottie::
 getLayerMatrix(const DrawState &drawState, const CLottieLayer *layer) const
 {
@@ -1841,12 +1905,12 @@ getLayerMatrix(const DrawState &drawState, const CLottieLayer *layer) const
   auto *player = layer->getParentLayer();
 
   if (player)
-    m = getLayerMatrix(drawState, player)*m;
+    m = getLayerMatrix(drawState, player).append(m);
 
   return m;
 }
 
-CMatrix2D
+CMatrixStack2D
 CQLottie::
 getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const
 {
@@ -1864,9 +1928,9 @@ getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const
     auto *transformShape = pshape->getTransformShape();
 
     if (transformShape)
-      m = getTransformMatrix(drawState, transformShape->transform())*m;
+      m = getTransformMatrix(drawState, transformShape->transform()).append(m);
     else
-      m = getTransformMatrix(drawState, pshape->transform())*m;
+      m = getTransformMatrix(drawState, pshape->transform()).append(m);
 
     shape1 = pshape;
   }
@@ -1889,16 +1953,19 @@ getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const
       //assert(repeatMatrix == drawState.repeatMatrix);
 
       //std::cerr << "Repeater for layer " << layer->name().value_or("") << "\n";
-      m = repeatMatrix*m;
+      m = repeatMatrix.append(m);
     }
 
-    m = getTransformMatrix(drawState, layer->transform())*m;
+//  if (layer->matteTargetLayer() || layer->matteModeLayer())
+//    break;
+
+    m = getTransformMatrix(drawState, layer->transform()).append(m);
   }
 
   return m;
 }
 
-CMatrix2D
+CMatrixStack2D
 CQLottie::
 calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const
 {
@@ -1909,7 +1976,7 @@ calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const
   return lottie_->getRepeaterMatrix(drawState.timeFrame, repeater->transform, mult);
 }
 
-CMatrix2D
+CMatrixStack2D
 CQLottie::
 getTransformMatrix(const DrawState &drawState, CLottie::Transform *transform) const
 {
@@ -2165,18 +2232,21 @@ resize(int w, int h)
 
     painter_ = nullptr;
 
-    image_ = QImage(w_, h_, QImage::Format_ARGB32);
+    image_ = QImage();
   }
-
-  clear();
 }
 
 QPainter *
 CQLottieLayer::
 painter()
 {
-  if (! painter_)
+  if (! painter_) {
+    image_ = QImage(w_, h_, QImage::Format_ARGB32);
+
+    image_.fill(0);
+
     painter_ = new QPainter(&image_);
+  }
 
   return painter_;
 }
@@ -2185,5 +2255,7 @@ void
 CQLottieLayer::
 clear()
 {
+  (void) painter();
+
   image_.fill(0);
 }

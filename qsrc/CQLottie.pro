@@ -45,6 +45,7 @@ INCLUDEPATH += \
 ../../CJson/include \
 ../../CUtil/include \
 ../../CMath/include \
+../../CStrUtil/include \
 ../../COS/include \
 
 PRE_TARGETDEPS = \

@@ -4,10 +4,12 @@
 #include <CJson.h>
 #include <CMathUtil.h>
 #include <CMathRound.h>
-#include <CMatrix2D.h>
+#include <CMatrixStack2D.h>
 #include <CBBox2D.h>
 #include <CPoint2D.h>
+#include <CStrUtil.h>
 #include <CRGBA.h>
+#include <CRGBName.h>
 #include <CUtil.h>
 
 #include <string>
@@ -190,6 +192,36 @@ struct TimeFrame {
   }
 };
 
+//---
+
+template<typename T>
+bool stringToValue(const std::string &str, T &t);
+
+template<>
+inline bool stringToValue<double>(const std::string &str, double &r) {
+  return CStrUtil::toReal(str, &r);
+}
+
+template<>
+inline bool stringToValue<CRGBA>(const std::string &str, CRGBA &rgba) {
+  return CRGBName::toRGBA(str, rgba);
+}
+
+template<>
+inline bool stringToValue<RValArray>(const std::string &, RValArray &) {
+  return false;
+}
+
+template<typename T>
+inline std::string valueToString(const T &value) {
+  return CUtil::toString(value);
+}
+
+template<>
+inline std::string valueToString<CRGBA>(const CRGBA &rgba) {
+  return rgba.stringEncode();
+}
+
 }
 
 //---
@@ -369,6 +401,10 @@ class CLottieProperty {
   //---
 
   virtual std::string tvalueStr(const TimeFrame &frame) const = 0;
+
+  //---
+
+  virtual bool setValueStr(const std::string &) { return false; }
 
   //---
 
@@ -575,7 +611,25 @@ class CLottie {
     std::string tvalueStr(const TimeFrame &frame) const override {
       auto value = tvalue(frame);
       if (! value) return "<none>";
-      return CUtil::toString(*value);
+      return CLottieUtil::valueToString(*value);
+    }
+
+    //---
+
+    bool setValueStr(const std::string &str) override {
+      if (isAnimated())
+        return false;
+
+      T value;
+      if (! CLottieUtil::stringToValue(str, value))
+        return false;
+
+      if (values.empty())
+        values.push_back(value);
+      else
+        values[0] = value;
+
+      return true;
     }
 
     //---
@@ -738,7 +792,7 @@ class CLottie {
     std::string tvalueStr(const TimeFrame &frame) const override {
       auto value = tvalue(frame);
       if (! value) return "<none>";
-      return CUtil::toString(*value);
+      return CLottieUtil::valueToString(*value);
     }
 
     //---
@@ -891,7 +945,7 @@ class CLottie {
     std::string tvalueStr(const TimeFrame &frame) const override {
       auto value = tvalue(frame);
       if (! value) return "<none>";
-      return CUtil::toString(*value);
+      return CLottieUtil::valueToString(*value);
     }
 
     //---
@@ -1040,7 +1094,7 @@ class CLottie {
     std::string tvalueStr(const TimeFrame &frame) const override {
       auto value = tvalue(frame);
       if (! value) return "<none>";
-      return CUtil::toString(*value);
+      return CLottieUtil::valueToString(*value);
     }
 
     //---
@@ -1189,7 +1243,7 @@ class CLottie {
     std::string tvalueStr(const TimeFrame &frame) const override {
       auto value = tvalue(frame);
       if (! value) return "<none>";
-      return CUtil::toString(*value);
+      return CLottieUtil::valueToString(*value);
     }
 
     //---
@@ -1419,9 +1473,9 @@ class CLottie {
       auto ivalue = tivalue(frame);
       auto ovalue = tovalue(frame);
       std::string str;
-      str += (ivalue ? CUtil::toString(*ivalue) : "<none>");
+      str += (ivalue ? CLottieUtil::valueToString(*ivalue) : "<none>");
       str += "/";
-      str += (ivalue ? CUtil::toString(*ivalue) : "<none>");
+      str += (ivalue ? CLottieUtil::valueToString(*ivalue) : "<none>");
       return str;
     }
 
@@ -1657,6 +1711,11 @@ class CLottie {
 
   bool load(const std::string &file);
 
+  void buildLayerHier();
+  void printLayerHier() const;
+
+  void printHier() const;
+
   void reset();
 
   //---
@@ -1664,6 +1723,8 @@ class CLottie {
   CLottieRoot *root() const { return root_; }
 
   CLottieAsset *getAssetById(const std::string &id) const;
+
+  void addLayerId(CLottieLayer *layer);
 
   CLottieLayer *getLayerById(int id) const;
 
@@ -1675,9 +1736,10 @@ class CLottie {
 
   void deselectAll();
 
-  CMatrix2D getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) const;
+  CMatrixStack2D getTransformMatrix(const TimeFrame &timeFrame,
+                                    CLottie::Transform *transform) const;
 
-  CMatrix2D getRepeaterMatrix(const TimeFrame &timeFrame,
+  CMatrixStack2D getRepeaterMatrix(const TimeFrame &timeFrame,
                               CLottie::Transform *transform, double f) const;
 
  private:
@@ -1854,7 +1916,7 @@ class CLottieObject {
   bool selected() const { return selected_; }
   void setSelected(bool b) { selected_ = b; }
 
-  const OptBool &hidden() const { return hidden_; }
+  const OptBool &isHidden() const { return hidden_; }
   void setHidden(const OptBool &v) { hidden_ = v; }
 
   const OptInt &ind() const { return ind_; }
@@ -1874,9 +1936,9 @@ class CLottieObject {
 
   virtual CLottieRoot *getRoot() const = 0;
 
-  virtual CMatrix2D calcTransform(const TimeFrame &) const = 0;
+  virtual CMatrixStack2D calcTransform(const TimeFrame &) const = 0;
 
-  virtual CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const {
+  virtual CMatrixStack2D calcHierTransform(const TimeFrame &timeFrame) const {
     return calcTransform(timeFrame);
   }
 
@@ -1962,14 +2024,15 @@ class CLottieRoot : public CLottieObject {
   void addAsset(CLottieAsset *asset) { assets_.push_back(asset); }
 
   const Layers &childLayers() const { return childLayers_; }
+  void addChildLayer(CLottieLayer *layer) { childLayers_.push_back(layer); }
 
   //---
 
   CLottieRoot *getRoot() const override { return const_cast<CLottieRoot *>(this); }
 
-  CMatrix2D calcTransform(const TimeFrame &) const override { return CMatrix2D::identity(); }
+  CMatrixStack2D calcTransform(const TimeFrame &) const override { return CMatrixStack2D(); }
 
-  void buildLayerHier();
+//void buildLayerHier();
   void printLayerHier() const;
 
   //---
@@ -2029,13 +2092,18 @@ class CLottieAsset : public CLottieObject {
 
   const Layers &layers() const { return layers_; }
 
-  void addLayer(CLottieLayer *layer) { layers_.push_back(layer); }
+  void addLayer(CLottieLayer *layer);
 
   //---
 
   CLottieRoot *getRoot() const override;
 
-  CMatrix2D calcTransform(const TimeFrame &) const override { return CMatrix2D::identity(); }
+  const Layers &childLayers() const { return childLayers_; }
+  void addChildLayer(CLottieLayer *layer) { childLayers_.push_back(layer); }
+
+  //---
+
+  CMatrixStack2D calcTransform(const TimeFrame &) const override { return CMatrixStack2D(); }
 
   void printI(const std::string &prefix, bool hier) const override;
 
@@ -2052,6 +2120,8 @@ class CLottieAsset : public CLottieObject {
   OptBool embedded_;
 
   Layers layers_;
+
+  Layers childLayers_;
 };
 
 //---
@@ -2097,7 +2167,7 @@ class CLottieEffect : public CLottieObject {
 
   CLottieRoot *getRoot() const override;
 
-  CMatrix2D calcTransform(const TimeFrame &) const override { return CMatrix2D::identity(); }
+  CMatrixStack2D calcTransform(const TimeFrame &) const override { return CMatrixStack2D(); }
 
   CLottieLayer *getLayer() const;
 
@@ -2306,18 +2376,17 @@ class CLottieLayer : public CLottieObject {
 
   void addShape(CLottieShape *shape) { shapes_.push_back(shape); }
 
-  const Layers &childLayers() const { return childLayers_; }
-
   //---
 
+  const Layers &childLayers() const { return childLayers_; }
   void addChildLayer(CLottieLayer *layer) { childLayers_.push_back(layer); }
 
   //---
 
   CLottieRoot *getRoot() const override;
 
-  CMatrix2D calcTransform(const TimeFrame &) const override;
-  CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const override;
+  CMatrixStack2D calcTransform(const TimeFrame &) const override;
+  CMatrixStack2D calcHierTransform(const TimeFrame &timeFrame) const override;
 
   CLottieRepeater *calcRepeater() const;
   CLottieShape *getRepeaterShape() const;
@@ -2434,7 +2503,7 @@ class CLottieMarker : public CLottieObject {
 
   CLottieRoot *getRoot() const override;
 
-  CMatrix2D calcTransform(const TimeFrame &) const override { return CMatrix2D::identity(); }
+  CMatrixStack2D calcTransform(const TimeFrame &) const override { return CMatrixStack2D(); }
 
   void printI(const std::string &prefix, bool hier) const override;
 };
@@ -2576,8 +2645,8 @@ class CLottieShape : public CLottieObject {
 
   //---
 
-  CMatrix2D calcTransform(const TimeFrame &) const override;
-  CMatrix2D calcHierTransform(const TimeFrame &timeFrame) const override;
+  CMatrixStack2D calcTransform(const TimeFrame &) const override;
+  CMatrixStack2D calcHierTransform(const TimeFrame &timeFrame) const override;
   CLottieShape *getTransformShape() const;
 
   Fill *calcFill() const;
@@ -2875,6 +2944,35 @@ class CLottieShape : public CLottieObject {
       if (! trim()) return nullptr;
       return &trim()->offset;
     }
+    else if (name == "polystar.position") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->position;
+    }
+    else if (name == "polystar.innerRadius") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->innerRadius;
+    }
+    else if (name == "polystar.innerRoundness") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->innerRoundness;
+    }
+    else if (name == "polystar.outerRadius") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->outerRadius;
+    }
+    else if (name == "polystar.outerRoundness") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->outerRoundness;
+    }
+    else if (name == "polystar.rotation") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->rotation;
+    }
+    else if (name == "polystar.points") {
+      if (! polyStar()) return nullptr;
+      return &polyStar()->points;
+    }
+
     else
       return CLottieObject::getProperty(name);
   }

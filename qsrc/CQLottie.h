@@ -185,10 +185,9 @@ class CQLottie : public QWidget {
 
     TimeFrame timeFrame;
 
-    CMatrix2D matrix { CMatrix2D::identity() };
+    CMatrixStack2D matrix;
 
-    Fill fill;
-
+    Fill   fill;
     Stroke stroke;
 
     //---
@@ -215,24 +214,13 @@ class CQLottie : public QWidget {
 
     int frameDelta { 0 };
 
-    OptInt    repeatInd;
-//  OptReal   repeatOpacity;
-//  CMatrix2D repeatMatrix;
+    OptInt         repeatInd;
+//  OptReal        repeatOpacity;
+//  CMatrixStack2D repeatMatrix;
 
     QPainterPathStroker *stroker { nullptr };
 
-    CMatrix2D getDisplayMatrix() const {
-#if 0
-      CMatrix2D pmatrix = CMatrix2D::identity();
-
-      for (const auto &displayRange : displayRanges)
-        pmatrix = pmatrix*displayRange.getMatrix();
-
-      return pmatrix;
-#else
-      return displayRange.getMatrix();
-#endif
-    }
+    CMatrix2D getDisplayMatrix() const { return displayRange.getMatrix(); }
   };
 
   void drawRoot(const DrawState &state, const CLottieRoot *root, bool update);
@@ -272,12 +260,13 @@ class CQLottie : public QWidget {
   void setSelectedPenBrush(QPainter *painter);
   void setBBoxPenBrush(QPainter *painter);
 
-  CMatrix2D getLayerMatrix(const DrawState &drawState, const CLottieLayer *layer) const;
-  CMatrix2D getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const;
+  CMatrixStack2D getLayerMatrix(const DrawState &drawState, const CLottieLayer *layer) const;
+  CMatrixStack2D getShapeMatrix(const DrawState &drawState, const CLottieShape *shape) const;
 
-  CMatrix2D calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const;
+  CMatrixStack2D calcRepeatMatrix(const DrawState &drawState, CLottieRepeater *repeater) const;
 
-  CMatrix2D getTransformMatrix(const DrawState &drawState, CLottie::Transform *transform) const;
+  CMatrixStack2D getTransformMatrix(const DrawState &drawState,
+                                    CLottie::Transform *transform) const;
 
   OptColor getFillColor(const DrawState &drawState, const CLottieShape *shape,
                        const OptColor &def=OptColor()) const;
@@ -294,7 +283,7 @@ class CQLottie : public QWidget {
 
   double getRepeatOpacity(const DrawState &drawState, CLottieRepeater *repeater) const;
 
-  QImage matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer) const;
+  QImage matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int matteMode) const;
 
  private:
   CQLottieToolBar*    toolbar_     { nullptr };
@@ -365,8 +354,11 @@ class CQLottieLayer : public CLottieLayer {
   int width () const { return w_; }
   int height() const { return h_; }
 
-  CQLottieLayer *matteLayer() const { return matteLayer_; }
-  void setMatteLayer(CQLottieLayer *l) { matteLayer_ = l; }
+  CQLottieLayer *matteTargetLayer() const { return matteTargetLayer_; }
+  void setMatteTargetLayer(CQLottieLayer *l) { matteTargetLayer_ = l; }
+
+  CQLottieLayer *matteModeLayer() const { return matteModeLayer_; }
+  void setMatteModeLayer(CQLottieLayer *l) { matteModeLayer_ = l; }
 
   void resize(int w, int h);
 
@@ -386,7 +378,8 @@ class CQLottieLayer : public CLottieLayer {
   bool changed_      { false };
   bool doubleBuffer_ { false };
 
-  CQLottieLayer* matteLayer_ { nullptr };
+  CQLottieLayer* matteTargetLayer_ { nullptr };
+  CQLottieLayer* matteModeLayer_   { nullptr };
 
   QImage    image_;
   QPainter* painter_ { nullptr };
