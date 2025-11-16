@@ -55,6 +55,7 @@ class CQLottieTree : public QFrame {
   void bboxSlot();
   void transformSlot();
   void hierTransformSlot();
+  void zoomSlot();
   void imageSlot();
   void printSlot();
 
@@ -199,7 +200,8 @@ class CQLottieTreeValueItem : public QTreeWidgetItem {
     SIZE,
     VECTOR,
     SCALAR,
-    BEZIER
+    BEZIER,
+    ARRAY
   };
 
  public:
@@ -248,13 +250,13 @@ class CQLottieTreeAssetValueItem : public CQLottieTreeValueItem {
 
 class CQLottieTreeLayerValueItem : public CQLottieTreeValueItem {
  public:
-  CQLottieTreeLayerValueItem(QTreeWidgetItem *parent, CLottieLayer *layer,
+  CQLottieTreeLayerValueItem(QTreeWidgetItem *parent, CQLottieLayer *layer,
                              const QString &propName, const Type &propType);
 
   CLottieLayer *layer() const { return layer_; }
 
  private:
-  CLottieLayer* layer_ { nullptr };
+  CQLottieLayer* layer_ { nullptr };
 };
 
 class CQLottieTreeShapeValueItem : public CQLottieTreeValueItem {

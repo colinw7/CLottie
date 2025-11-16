@@ -4,6 +4,8 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QMenu>
+#include <QAction>
 
 CQLottieCanvas::
 CQLottieCanvas(CQLottie *lottie) :
@@ -12,6 +14,43 @@ CQLottieCanvas(CQLottie *lottie) :
   setFocusPolicy(Qt::StrongFocus);
 
   setMouseTracking(true);
+
+  setContextMenuPolicy(Qt::CustomContextMenu);
+
+  connect(this, SIGNAL(customContextMenuRequested(const QPoint&)),
+          this, SLOT(customContextMenuSlot(const QPoint&)));
+}
+
+void
+CQLottieCanvas::
+customContextMenuSlot(const QPoint &pos)
+{
+  // Map point to global from the viewport to account for the header.
+  auto gpos = mapToGlobal(pos);
+
+  auto *menu = new QMenu;
+
+  auto *zoomFullAction     = new QAction("Zoom Full", menu);
+  auto *showTimeLineAction = new QAction("Show Time Line", menu);
+  auto *showPathAction     = new QAction("Show Path", menu);
+
+  showTimeLineAction->setCheckable(true);
+  showPathAction    ->setCheckable(true);
+
+  showTimeLineAction->setChecked(lottie_->isShowTimeLine());
+  showPathAction    ->setChecked(lottie_->isShowPath());
+
+  menu->addAction(zoomFullAction);
+  menu->addAction(showTimeLineAction);
+  menu->addAction(showPathAction);
+
+  connect(zoomFullAction    , SIGNAL(triggered()), lottie_, SLOT(zoomFull()));
+  connect(showTimeLineAction, SIGNAL(triggered(bool)), lottie_, SLOT(setShowTimeLine(bool)));
+  connect(showPathAction    , SIGNAL(triggered(bool)), lottie_, SLOT(setShowPath(bool)));
+
+  menu->exec(gpos);
+
+  delete menu;
 }
 
 void
@@ -92,6 +131,7 @@ keyPressEvent(QKeyEvent *ke)
   else if (key == Qt::Key_Home) {
     lottie_->zoomFull();
   }
-
-  invalidate();
+  else if (key == Qt::Key_F1) {
+    lottie_->nextGeomShape();
+  }
 }

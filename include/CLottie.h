@@ -5,6 +5,7 @@
 #include <CMathUtil.h>
 #include <CMathRound.h>
 #include <CMatrixStack2D.h>
+#include <CBezierPath.h>
 #include <CBBox2D.h>
 #include <CPoint2D.h>
 #include <CStrUtil.h>
@@ -18,6 +19,11 @@ namespace CLottieUtil {
 
 template<typename T>
 T mapValue(double t, const T &v1, const T &v2);
+
+template<>
+inline bool mapValue<bool>(double t, const bool &v1, const bool &v2) {
+  return (t < 0.5 ? v1 : v2);
+}
 
 template<>
 inline double mapValue<double>(double t, const double &v1, const double &v2) {
@@ -131,7 +137,7 @@ template<>
 inline RValArray mapValue<RValArray>(double t, const RValArray &v1, const RValArray &v2) {
   RValArray v;
 
-  auto n = std::min(v.vals.size(), v.vals.size());
+  auto n = std::min(v1.vals.size(), v2.vals.size());
 
   for (uint i = 0; i < n; ++i)
     v.vals.push_back(CMathUtil::map(t, 0.0, 1.0, v1.vals[i], v2.vals[i]));
@@ -147,6 +153,8 @@ struct PointList {
   PointList() { }
 
   PointList(const Points &p) : points(p) { }
+
+  bool isEmpty() const { return points.empty(); }
 
   friend std::ostream &operator<<(std::ostream &os, const PointList &l) {
     int i = 0;
@@ -186,6 +194,7 @@ struct TimeFrame {
 
   double secs  { 0.0 };
   uint   frame { 0 };
+  int    delta { 0 };
 
   double mapFrame() const {
     return CMathUtil::map(frame, frameStart.value_or(0.0), frameStop.value_or(1.0), 0.0, 1.0);
@@ -196,6 +205,15 @@ struct TimeFrame {
 
 template<typename T>
 bool stringToValue(const std::string &str, T &t);
+
+template<typename T>
+bool stringToValue(const std::string &str, std::optional<T> &t) {
+  T t1;
+  if (! stringToValue(str, t1))
+    return false;
+  t = t1;
+  return true;
+}
 
 template<>
 inline bool stringToValue<double>(const std::string &str, double &r) {
@@ -215,6 +233,11 @@ inline bool stringToValue<RValArray>(const std::string &, RValArray &) {
 template<typename T>
 inline std::string valueToString(const T &value) {
   return CUtil::toString(value);
+}
+
+template<typename T>
+inline std::string valueToString(const std::optional<T> &value) {
+  return (value ? CUtil::toString(*value) : "");
 }
 
 template<>
@@ -239,9 +262,11 @@ struct CLottieEffectValue;
 
 class CLottieKeyFrame {
  public:
-  using XYVals   = CLottieUtil::XYVals;
-  using OptPoint = std::optional<CPoint2D>;
-  using OptReal  = std::optional<double>;
+  using XYVals         = CLottieUtil::XYVals;
+  using Interpolations = std::vector<std::string>;
+  using OptPoint       = std::optional<CPoint2D>;
+  using OptReal        = std::optional<double>;
+  using OptBool        = std::optional<bool>;
 
  public:
   CLottieKeyFrame() { }
@@ -250,14 +275,26 @@ class CLottieKeyFrame {
 
   //----
 
+  const Interpolations &interpolation() const { return interpolation_; }
+  void setInterpolation(const Interpolations &i) { interpolation_ = i; }
+
   const std::vector<XYVals> &ivalues() const { return ivalues_; }
+  void setIValues(const std::vector<XYVals> &v) { ivalues_ = v; }
+
   const std::vector<XYVals> &ovalues() const { return ovalues_; }
+  void setOValues(const std::vector<XYVals> &v) { ovalues_ = v; }
 
   const OptReal &timeFrame() const { return timeFrame_; }
   void setTimeFrame(const OptReal &v) { timeFrame_ = v; }
 
-  bool isHold() const { return hold_; }
-  void setHold(bool b) { hold_ = b; }
+  const OptBool &isHold() const { return hold_; }
+  void setHold(const OptBool &b) { hold_ = b; }
+
+  const OptPoint &tangentIn() const { return tangentIn_; }
+  void setTangentIn(const OptPoint &p) { tangentIn_ = p; }
+
+  const OptPoint &tangentOut() const { return tangentOut_; }
+  void setTangentOut(const OptPoint &p) { tangentOut_ = p; }
 
   //----
 
@@ -271,40 +308,40 @@ class CLottieKeyFrame {
         std::cout << prefix << n << "=" << *value << "\n";
     };
 
-    if (! ivalues_.empty()) {
+    if (! ivalues().empty()) {
       printValue("ivalues", "");
 
-      for (auto &v : ivalues_) {
+      for (auto &v : ivalues()) {
         std::cout << prefix << "  " << v << "\n";
       }
     }
 
-    if (! ovalues_.empty()) {
+    if (! ovalues().empty()) {
       printValue("ovalues", "");
 
-      for (auto &v : ovalues_) {
+      for (auto &v : ovalues()) {
         std::cout << prefix << "  " << v << "\n";
       }
     }
 
-    if (! interpolation_.empty()) {
+    if (! interpolation().empty()) {
       printValue("interpolation", "");
 
-      for (auto &v : interpolation_) {
+      for (auto &v : interpolation()) {
         std::cout << prefix << "  " << v << "\n";
       }
     }
 
-    optPrintValue("tangentIn" , tangentIn_ );
-    optPrintValue("tangentOut", tangentOut_);
+    optPrintValue("tangentIn" , tangentIn());
+    optPrintValue("tangentOut", tangentOut());
 
-    optPrintValue("timeFrame", timeFrame_);
+    optPrintValue("timeFrame", timeFrame());
 
-    printValue("hold", hold_);
+    optPrintValue("hold", isHold());
   }
 
- public:
-  std::vector<std::string> interpolation_;
+ private:
+  Interpolations interpolation_;
 
   std::vector<XYVals> ivalues_;
   std::vector<XYVals> ovalues_;
@@ -314,10 +351,57 @@ class CLottieKeyFrame {
 
   OptReal timeFrame_;
 
-  bool hold_ { false };
+  OptBool hold_ { false };
 };
 
 //----
+
+class CLottieVariant {
+ public:
+  enum class Type {
+    NONE,
+    REAL,
+    INTEGER,
+    STRING,
+    RGBA
+  };
+
+  CLottieVariant() { }
+  CLottieVariant(const Type &t) : type_(t) { }
+
+  virtual ~CLottieVariant() { }
+
+  virtual std::string value() const = 0;
+  virtual bool setValue(const std::string &) const = 0;
+
+ private:
+  Type type_ { Type::NONE };
+};
+
+template<typename T>
+class CLottieVariantT : public CLottieVariant {
+ public:
+  CLottieVariantT(T *data) :
+   data_(data) {
+  }
+
+  std::string value() const override {
+    return CLottieUtil::valueToString(*data_);
+  }
+
+  bool setValue(const std::string &str) const override {
+    T value;
+    if (! CLottieUtil::stringToValue(str, value))
+      return false;
+    *data_ = value;
+    return true;
+  }
+
+ private:
+  T *data_ { nullptr };
+};
+
+//---
 
 class CLottieProperty {
  public:
@@ -419,24 +503,26 @@ class CLottieProperty {
     frameInd.pos = FramePos::BEFORE;
     frameInd.ind = 0;
 
+    auto rframe = double(frame.frame) + frame.delta;
+
     for (uint i = 0; i < nf; ++i) {
       auto *keyFrame1 = keyFrame(i);
       auto *keyFrame2 = (i < nf - 1 ? keyFrame(i + 1) : nullptr);
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
 
       OptReal frameStop;
 
       if (keyFrame2)
-        frameStop = keyFrame2->timeFrame_.value_or(0.0);
+        frameStop = keyFrame2->timeFrame().value_or(0.0);
 
-      if (frame.frame >= frameStart && frameStop && frame.frame < frameStop.value()) {
+      if (rframe >= frameStart && frameStop && rframe < frameStop.value()) {
         frameInd.pos = FramePos::INSIDE;
         frameInd.ind = int(i);
         break;
       }
 
-      if (frameStop && frame.frame >= frameStop.value()) {
+      if (frameStop && rframe >= frameStop.value()) {
         frameInd.pos = FramePos::AFTER;
         frameInd.ind = int(i);
       }
@@ -516,6 +602,7 @@ class CLottie {
   using Layers  = std::vector<CLottieLayer *>;
   using Shapes  = std::vector<CLottieShape *>;
   using Markers = std::vector<CLottieMarker *>;
+  using Effects = std::vector<CLottieEffect *>;
 
   struct RVals {
     RVals() { }
@@ -565,7 +652,7 @@ class CLottie {
 
     size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
@@ -656,20 +743,22 @@ class CLottie {
       auto frameInd = calcFrameInd(frame);
       if (frameInd.pos == FramePos::NONE) return def;
 
-      auto nf = keyFrames.size();
+      auto nf = numKeyFrames();
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      auto rframe = double(frame.frame) + frame.delta;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
                                      frame.frameStop.value_or(1.0));
 
       if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
         if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
           --frameInd.ind;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+          keyFrame1 = keyFrame(frameInd.ind);
         }
       }
 
@@ -686,7 +775,7 @@ class CLottie {
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+          auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
@@ -753,7 +842,7 @@ class CLottie {
 
     size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
@@ -819,55 +908,145 @@ class CLottie {
       auto frameInd = calcFrameInd(frame);
       if (frameInd.pos == FramePos::NONE) return def;
 
-      auto nf = keyFrames.size();
+      auto nf = numKeyFrames();
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      auto rframe = double(frame.frame) + frame.delta;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
                                      frame.frameStop.value_or(1.0));
 
       if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
         if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
           --frameInd.ind;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+          keyFrame1 = keyFrame(frameInd.ind);
         }
       }
 
       if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
         return def;
 
-      OptVal v1, v2;
+      OptVal v1, v4;
 
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
       if (! keyFrame1->endValue.vals.empty())
-        v2 = keyFrame1->endValue.vals[0];
+        v4 = keyFrame1->endValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
-        if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+        if (v1 && v4) {
+          auto t = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
 
-          return CLottieUtil::mapValue(dt, *v1, *v2);
+          auto v2 = *v1 + keyFrame1->tangentOut().value_or(CPoint2D(0, 0));
+          auto v3 = *v4 + keyFrame1->tangentIn ().value_or(CPoint2D(0, 0));
+
+          CBezierPath bezierPath;
+          bezierPath.moveTo(*v1);
+          bezierPath.cubicTo(v2, v3, *v4);
+
+          if (bezierPath.arcLength() > 0.0)
+            return bezierPath.calc(t);
+          else
+            return CLottieUtil::mapValue(t, *v1, *v4);
         }
         else if (v1)
           return v1;
-        else if (v2)
-          return v2;
+        else if (v4)
+          return v4;
       }
       else if (frameInd.pos == FramePos::BEFORE) {
         if (v1)
           return v1;
       }
       else if (frameInd.pos == FramePos::AFTER) {
-        if (v2)
-          return v2;
+        if (v4)
+          return v4;
       }
 
       return def;
+    }
+
+    //---
+
+    double pathGradient(const TimeFrame &frame) const {
+      auto frameInd = calcFrameInd(frame);
+      if (frameInd.pos == FramePos::NONE) return 0.0;
+
+      auto nf = numKeyFrames();
+
+      auto rframe = double(frame.frame) + frame.delta;
+
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
+                                     frame.frameStop.value_or(1.0));
+
+      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
+        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+          --frameInd.ind;
+
+          keyFrame1 = keyFrame(frameInd.ind);
+        }
+      }
+
+      if (keyFrame1->startValue.vals.empty() && keyFrame1->endValue.vals.empty())
+        return 0.0;
+
+      auto v1 = keyFrame1->startValue.vals[0];
+      auto v4 = keyFrame1->endValue  .vals[0];
+
+      auto v2 = v1 + keyFrame1->tangentOut().value_or(CPoint2D(0, 0));
+      auto v3 = v4 + keyFrame1->tangentIn ().value_or(CPoint2D(0, 0));
+
+      CBezierPath bezierPath;
+      bezierPath.moveTo(v1);
+      bezierPath.cubicTo(v2, v3, v4);
+
+      auto t = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
+
+      return CMathGen::RadToDeg(bezierPath.gradient(t));
+    }
+
+    CBezierPath path() const {
+      CBezierPath bezierPath;
+
+      int i = 0;
+
+      for (auto *kf : keyFrames) {
+        if (kf->startValue.vals.empty())
+          continue;
+
+        auto v1 = kf->startValue.vals[0];
+        auto v2 = v1 + kf->tangentOut().value_or(CPoint2D(0, 0));
+        auto v4 = kf->endValue  .vals[0];
+        auto v3 = v4 + kf->tangentIn ().value_or(CPoint2D(0, 0));
+
+        if (i == 0)
+          bezierPath.moveTo(v1);
+#if 0
+        else
+          bezierPath.lineTo(v1);
+#endif
+
+#if 1
+        bezierPath.cubicTo(v2, v3, v4);
+#else
+        bezierPath.lineTo(v2);
+        bezierPath.lineTo(v3);
+        bezierPath.lineTo(v4);
+#endif
+
+        ++i;
+      }
+
+      return bezierPath;
     }
 
    public:
@@ -906,7 +1085,7 @@ class CLottie {
 
     size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
@@ -972,20 +1151,22 @@ class CLottie {
       auto frameInd = calcFrameInd(frame);
       if (frameInd.pos == FramePos::NONE) return def;
 
-      auto nf = keyFrames.size();
+      auto nf = numKeyFrames();
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      auto rframe = double(frame.frame) + frame.delta;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
                                      frame.frameStop.value_or(1.0));
 
       if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
         if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
           --frameInd.ind;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+          keyFrame1 = keyFrame(frameInd.ind);
         }
       }
 
@@ -997,12 +1178,14 @@ class CLottie {
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
-      if (! keyFrame1->endValue.vals.empty())
+      if      (! keyFrame1->endValue.vals.empty())
         v2 = keyFrame1->endValue.vals[0];
+      else if (! keyFrame2->startValue.vals.empty())
+        v2 = keyFrame2->startValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+          auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
@@ -1055,7 +1238,7 @@ class CLottie {
 
     size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
@@ -1121,20 +1304,22 @@ class CLottie {
       auto frameInd = calcFrameInd(frame);
       if (frameInd.pos == FramePos::NONE) return def;
 
-      auto nf = keyFrames.size();
+      auto nf = numKeyFrames();
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      auto rframe = double(frame.frame) + frame.delta;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
                                      frame.frameStop.value_or(1.0));
 
       if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
         if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
           --frameInd.ind;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+          keyFrame1 = keyFrame(frameInd.ind);
         }
       }
 
@@ -1151,7 +1336,7 @@ class CLottie {
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+          auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
@@ -1204,7 +1389,7 @@ class CLottie {
 
     size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return keyFrames[i]; }
 
     //---
 
@@ -1270,20 +1455,22 @@ class CLottie {
       auto frameInd = calcFrameInd(frame);
       if (frameInd.pos == FramePos::NONE) return def;
 
-      auto nf = keyFrames.size();
+      auto nf = numKeyFrames();
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      auto rframe = double(frame.frame) + frame.delta;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
+      auto *keyFrame1 = keyFrame(frameInd.ind);
+      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+      auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
                                      frame.frameStop.value_or(1.0));
 
       if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
         if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
           --frameInd.ind;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+          keyFrame1 = keyFrame(frameInd.ind);
         }
       }
 
@@ -1300,7 +1487,7 @@ class CLottie {
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
+          auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
 
           return CLottieUtil::mapValue(dt, *v1, *v2);
         }
@@ -1330,9 +1517,9 @@ class CLottie {
 
   using PointList = CLottieUtil::PointList;
 
-  class BezierKeyFrame : public CLottieKeyFrame {
+  class BezierPathData {
    public:
-    void print(const std::string &prefix="") const override {
+    void print(const std::string &prefix="") const {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
       };
@@ -1371,10 +1558,31 @@ class CLottie {
     bool                  closed { false };
   };
 
+  class BezierKeyFrame : public CLottieKeyFrame {
+   public:
+    BezierKeyFrame() { }
+
+   ~BezierKeyFrame() {
+      delete ipathData;
+      delete epathData;
+    }
+
+    OptBool         closed;
+    PointList       values;
+    PointList       ivalues;
+    PointList       ovalues;
+    PointList       vvalues;
+    Interpolations  interpolation;
+    BezierPathData* ipathData { nullptr };
+    BezierPathData* epathData { nullptr };
+  };
+
   class BezierProperty : public CLottieProperty {
    public:
     using OptVal   = std::optional<PointList>;
     using KeyFrame = BezierKeyFrame;
+
+    using Interpolations = std::vector<std::string>;
 
    public:
     BezierProperty() :
@@ -1382,18 +1590,15 @@ class CLottie {
     }
 
    ~BezierProperty() override {
-      for (auto *keyFrame : ikeyFrames)
-        delete keyFrame;
-
-      for (auto *keyFrame : ekeyFrames)
+      for (auto *keyFrame : keyFrames)
         delete keyFrame;
     }
 
     //---
 
-    size_t numKeyFrames() const override { return ikeyFrames.size(); }
+    size_t numKeyFrames() const override { return keyFrames.size(); }
 
-    CLottieKeyFrame *keyFrame(uint i) const override { return ikeyFrames[i]; }
+    KeyFrame *keyFrame(uint i) const override { return const_cast<KeyFrame *>(keyFrames[i]); }
 
     //---
 
@@ -1402,81 +1607,99 @@ class CLottie {
         std::cout << prefix << n << "=" << value << "\n";
       };
 
+      auto optPrintValue = [&](const std::string &n, const auto &value) {
+        if (value)
+          std::cout << prefix << n << "=" << *value << "\n";
+      };
+
       CLottieProperty::print(prefix);
 
-      printValue("closed", closed);
+      for (auto *keyFrame : keyFrames) {
+        optPrintValue("closed", keyFrame->closed);
 
-      if (! values.empty()) {
-        printValue("values", "");
+        if (! keyFrame->interpolation.empty()) {
+          std::cout << prefix << "interpolation [";
 
-        for (auto &v : values) {
-          std::cout << prefix << "  " << v << "\n";
+          for (const auto &i : keyFrame->interpolation)
+            std::cout << " " << i;
+
+          std::cout << "]\n";
         }
-      }
 
-      if (! ivalues.empty()) {
-        printValue("ivalues", "");
+        optPrintValue("timeFrame", keyFrame->timeFrame());
 
-        for (auto &v : ivalues) {
-          std::cout << prefix << "  " << v << "\n";
+        printValue("values", keyFrame->values);
+
+        printValue("ivalues", keyFrame->ivalues);
+        printValue("ovalues", keyFrame->ovalues);
+        printValue("vvalues", keyFrame->vvalues);
+
+        if (keyFrame->ipathData) {
+          printValue("ipathData", "");
+
+          keyFrame->ipathData->print(prefix + "  ");
         }
-      }
 
-      if (! ovalues.empty()) {
-        printValue("ovalues", "");
+        if (keyFrame->epathData) {
+          printValue("epathData", "");
 
-        for (auto &v : ovalues) {
-          std::cout << prefix << "  " << v << "\n";
+          keyFrame->epathData->print(prefix + "  ");
         }
-      }
-
-      if (! vvalues.empty()) {
-        printValue("vvalues", "");
-
-        for (auto &v : vvalues) {
-          std::cout << prefix << "  " << v << "\n";
-        }
-      }
-
-      if (! ikeyFrames.empty()) {
-        printValue("ikeyFrames", "");
-
-        for (auto *k : ikeyFrames)
-          k->print(prefix + "  ");
-      }
-
-      if (! ekeyFrames.empty()) {
-        printValue("ikeyFrames", "");
-
-        for (auto *k : ekeyFrames)
-          k->print(prefix + "  ");
       }
     }
 
     //---
 
-    bool isSet() const override {
-      return (! vvalues.empty() || ! ivalues.empty());
-    }
+    bool isSet() const override { return ! keyFrames.empty(); }
 
     bool isTSet() const override {
-      return (! ikeyFrames.empty() && ! ekeyFrames.empty());
-    }
+      return ! keyFrames.empty() && ! keyFrames[0]->ivalues.isEmpty(); }
 
-    bool isISet() const { return ! ivalues.empty(); }
-    bool isOSet() const { return ! ovalues.empty(); }
-    bool isVSet() const { return ! vvalues.empty(); }
+    bool isISet() const { return ! keyFrames.empty()  && ! keyFrames[0]->ivalues.isEmpty(); }
+    bool isOSet() const { return ! keyFrames.empty()  && ! keyFrames[0]->ovalues.isEmpty(); }
+    bool isVSet() const { return ! keyFrames.empty()  && ! keyFrames[0]->vvalues.isEmpty(); }
 
     //---
 
     std::string tvalueStr(const TimeFrame &frame) const override {
-      auto ivalue = tivalue(frame);
-      auto ovalue = tovalue(frame);
-      std::string str;
-      str += (ivalue ? CLottieUtil::valueToString(*ivalue) : "<none>");
-      str += "/";
-      str += (ivalue ? CLottieUtil::valueToString(*ivalue) : "<none>");
-      return str;
+      auto points  = tvvalue(frame, CLottie::PointList() )->points;
+      auto ipoints = tivalue(frame, CLottie::PointList() )->points;
+      auto opoints = tovalue(frame, CLottie::PointList() )->points;
+      auto closed  = tclosed(frame).value_or(false);
+
+      CBezierPath bezierPath;
+
+      bezierPath.clear();
+
+      auto n = points.size();
+      if (n == 0) return "";
+
+      if (ipoints.size() != n || opoints.size() != n)
+        return "";
+
+      auto p1 = points[0];
+
+      bezierPath.moveTo(p1);
+
+      for (size_t i = 1; i < n; ++i) {
+        auto p2 = points[i - 1] + opoints[i - 1];
+        auto p3 = points[i    ] + ipoints[i    ];
+        auto p4 = points[i    ];
+
+        bezierPath.cubicTo(p2, p3, p4);
+      }
+
+      if (closed) {
+        auto p2 = points[n - 1] + opoints[n - 1];
+        auto p3 = points[0    ] + ipoints[0    ];
+        auto p4 = points[0    ];
+
+        bezierPath.cubicTo(p2, p3, p4);
+
+        bezierPath.setClosed(true);
+      }
+
+      return bezierPath.toString();
     }
 
     //---
@@ -1485,21 +1708,21 @@ class CLottie {
       if (! isISet())
         return def;
 
-      return ivalues[0];
+      return keyFrames[0]->ivalues;
     }
 
     OptVal ovalue(const OptVal &def=OptVal()) const {
       if (! isOSet())
         return def;
 
-      return ovalues[0];
+      return keyFrames[0]->ovalues;
     }
 
     OptVal vvalue(const OptVal &def=OptVal()) const {
       if (! isVSet())
         return def;
 
-      return vvalues[0];
+      return keyFrames[0]->vvalues;
     }
 
     OptVal tivalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
@@ -1507,14 +1730,75 @@ class CLottie {
         if (! isTSet())
           return ivalue(def);
 
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % ikeyFrames.size());
-        auto t2 = (t1 + 1) % ekeyFrames.size();
+#if 1
+        auto frameInd = calcFrameInd(frame);
+        if (frameInd.pos == FramePos::NONE) return def;
+
+        auto nf = numKeyFrames();
+
+        auto rframe = double(frame.frame) + frame.delta;
+
+        auto *keyFrame1 = keyFrame(frameInd.ind);
+        auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+        auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+        auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
+                                       frame.frameStop.value_or(1.0));
+
+        auto hasPathData = [&](BezierPathData *pathData) {
+          return (pathData && ! pathData->ipoints.empty());
+        };
+
+        if (! hasPathData(keyFrame1->ipathData) || ! hasPathData(keyFrame1->epathData)) {
+          if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+            --frameInd.ind;
+
+            keyFrame1 = keyFrame(frameInd.ind);
+          }
+        }
+
+        if (! hasPathData(keyFrame1->ipathData) && ! hasPathData(keyFrame1->epathData))
+          return def;
+
+        std::optional<Points> v1, v2;
+
+        if (hasPathData(keyFrame1->ipathData))
+          v1 = keyFrame1->ipathData->ipoints;
+
+        if (hasPathData(keyFrame1->epathData))
+          v2 = keyFrame1->epathData->ipoints;
+
+        if (frameInd.pos == FramePos::INSIDE) {
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
+
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else if (v2)
+            return v2;
+        }
+        else if (frameInd.pos == FramePos::BEFORE) {
+          if (v1)
+            return v1;
+        }
+        else if (frameInd.pos == FramePos::AFTER) {
+          if (v2)
+            return v2;
+        }
+
+        return def;
+#else
+        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
+        auto t2 = (t1 + 1) % keyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1]->ipoints;
-        const auto &v2 = ekeyFrames[t2]->ipoints;
+        const auto &v1 = keyFrames[t1]->ipathData->ipoints;
+        const auto &v2 = keyFrames[t2]->epathData->ipoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
+#endif
       }
       else
         return ivalue(def);
@@ -1525,14 +1809,75 @@ class CLottie {
         if (! isTSet())
           return ovalue(def);
 
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % ikeyFrames.size());
-        auto t2 = (t1 + 1) % ekeyFrames.size();
+#if 1
+        auto frameInd = calcFrameInd(frame);
+        if (frameInd.pos == FramePos::NONE) return def;
+
+        auto nf = numKeyFrames();
+
+        auto rframe = double(frame.frame) + frame.delta;
+
+        auto *keyFrame1 = keyFrame(frameInd.ind);
+        auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+        auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+        auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
+                                       frame.frameStop.value_or(1.0));
+
+        auto hasPathData = [&](BezierPathData *pathData) {
+          return (pathData && ! pathData->vpoints.empty());
+        };
+
+        if (! hasPathData(keyFrame1->ipathData) || ! hasPathData(keyFrame1->epathData)) {
+          if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+            --frameInd.ind;
+
+            keyFrame1 = keyFrame(frameInd.ind);
+          }
+        }
+
+        if (! hasPathData(keyFrame1->ipathData) && ! hasPathData(keyFrame1->epathData))
+          return def;
+
+        std::optional<Points> v1, v2;
+
+        if (hasPathData(keyFrame1->ipathData))
+          v1 = keyFrame1->ipathData->opoints;
+
+        if (hasPathData(keyFrame1->epathData))
+          v2 = keyFrame1->epathData->opoints;
+
+        if (frameInd.pos == FramePos::INSIDE) {
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
+
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else if (v2)
+            return v2;
+        }
+        else if (frameInd.pos == FramePos::BEFORE) {
+          if (v1)
+            return v1;
+        }
+        else if (frameInd.pos == FramePos::AFTER) {
+          if (v2)
+            return v2;
+        }
+
+        return def;
+#else
+        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
+        auto t2 = (t1 + 1) % keyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1]->opoints;
-        const auto &v2 = ekeyFrames[t2]->opoints;
+        const auto &v1 = keyFrames[t1]->ipathData->opoints;
+        const auto &v2 = keyFrames[t2]->epathData->opoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
+#endif
       }
       else
         return ovalue(def);
@@ -1544,108 +1889,202 @@ class CLottie {
           return vvalue(def);
 
 #if 1
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % ikeyFrames.size());
-        auto t2 = (t1 + 1) % ekeyFrames.size();
+        auto frameInd = calcFrameInd(frame);
+        if (frameInd.pos == FramePos::NONE) return def;
+
+        auto nf = numKeyFrames();
+
+        auto rframe = double(frame.frame) + frame.delta;
+
+        auto *keyFrame1 = keyFrame(frameInd.ind);
+        auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+        auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+        auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
+                                       frame.frameStop.value_or(1.0));
+
+        auto hasPathData = [&](BezierPathData *pathData) {
+          return (pathData && ! pathData->vpoints.empty());
+        };
+
+        if (! hasPathData(keyFrame1->ipathData) || ! hasPathData(keyFrame1->epathData)) {
+          if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+            --frameInd.ind;
+
+            keyFrame1 = keyFrame(frameInd.ind);
+          }
+        }
+
+        if (! hasPathData(keyFrame1->ipathData) && ! hasPathData(keyFrame1->epathData))
+          return def;
+
+        std::optional<Points> v1, v2;
+
+        if (hasPathData(keyFrame1->ipathData))
+          v1 = keyFrame1->ipathData->vpoints;
+
+        if (hasPathData(keyFrame1->epathData))
+          v2 = keyFrame1->epathData->vpoints;
+
+        if (frameInd.pos == FramePos::INSIDE) {
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
+
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else if (v2)
+            return v2;
+        }
+        else if (frameInd.pos == FramePos::BEFORE) {
+          if (v1)
+            return v1;
+        }
+        else if (frameInd.pos == FramePos::AFTER) {
+          if (v2)
+            return v2;
+        }
+
+        return def;
+#else
+        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
+        auto t2 = (t1 + 1) % keyFrames.size();
         auto dt = frame.secs - CMathRound::RoundDown(frame.secs);
 
-        const auto &v1 = ikeyFrames[t1]->vpoints;
-        const auto &v2 = ekeyFrames[t2]->vpoints;
+        const auto &v1 = keyFrames[t1]->ipathData->vpoints;
+        const auto &v2 = keyFrames[t2]->epathData->vpoints;
 
         return CLottieUtil::mapValue(dt, v1, v2);
-#else
-        return keyFrameValue(frame, def);
 #endif
       }
       else
         return vvalue(def);
     }
 
-    bool tclosed(const TimeFrame &frame) const {
+    OptBool tclosed(const TimeFrame &frame, const OptBool &def=OptBool()) const {
       if (isAnimated()) {
         if (! isTSet())
-          return closed;
+          return def;
 
 #if 1
-        auto t1 = int(CMathRound::RoundDown(frame.secs) % ikeyFrames.size());
+        auto frameInd = calcFrameInd(frame);
+        if (frameInd.pos == FramePos::NONE) return def;
 
-        auto v1 = ikeyFrames[t1]->closed;
+        auto nf = numKeyFrames();
+
+        auto rframe = double(frame.frame) + frame.delta;
+
+        auto *keyFrame1 = keyFrame(frameInd.ind);
+        auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrame(frameInd.ind + 1) : nullptr);
+
+        auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+        auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame().value_or(0.0) :
+                                       frame.frameStop.value_or(1.0));
+
+        auto hasPathData = [&](BezierPathData *pathData) {
+          return (pathData && pathData->closed);
+        };
+
+        if (! hasPathData(keyFrame1->ipathData) || ! hasPathData(keyFrame1->epathData)) {
+          if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
+            --frameInd.ind;
+
+            keyFrame1 = keyFrame(frameInd.ind);
+          }
+        }
+
+        if (! hasPathData(keyFrame1->ipathData) && ! hasPathData(keyFrame1->epathData))
+          return def;
+
+        std::optional<bool> v1, v2;
+
+        if (hasPathData(keyFrame1->ipathData))
+          v1 = keyFrame1->ipathData->closed;
+
+        if (hasPathData(keyFrame1->epathData))
+          v2 = keyFrame1->epathData->closed;
+
+        if (frameInd.pos == FramePos::INSIDE) {
+          if (v1 && v2) {
+            auto dt = CMathUtil::map(rframe, frameStart, frameStop, 0.0, 1.0);
+
+            return CLottieUtil::mapValue(dt, *v1, *v2);
+          }
+          else if (v1)
+            return v1;
+          else if (v2)
+            return v2;
+        }
+        else if (frameInd.pos == FramePos::BEFORE) {
+          if (v1)
+            return v1;
+        }
+        else if (frameInd.pos == FramePos::AFTER) {
+          if (v2)
+            return v2;
+        }
+
+        return def;
+#else
+        auto t1 = int(CMathRound::RoundDown(frame.secs) % keyFrames.size());
+
+        auto v1 = keyFrames[t1]->closed.value_or(false);
 
         return v1;
-#else
-        return keyFrameClosed(frame, def);
 #endif
       }
-      else
-        return closed;
+      else {
+        if (keyFrames.empty())
+          return def;
+
+        return keyFrames[0]->closed.value_or(false);
+      }
     }
 
-#if 0
-    OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      auto frameInd = calcFrameInd(frame);
-      if (frameInd.pos == FramePos::NONE) return def;
+    FrameInd calcFrameInd(const TimeFrame &frame) const override {
+      FrameInd frameInd;
 
-      auto nf = keyFrames.size();
+      auto nf = uint(numKeyFrames());
 
-      auto *keyFrame1 = keyFrames[frameInd.ind];
-      auto *keyFrame2 = (frameInd.ind < int(nf - 1) ? keyFrames[frameInd.ind + 1] : nullptr);
+      if (nf == 0)
+        return frameInd;
 
-      auto frameStart = keyFrame1->timeFrame_.value_or(0.0);
-      auto frameStop  = (keyFrame2 ? keyFrame2->timeFrame_.value_or(0.0) :
-                                     frame.frameStop.value_or(1.0));
+      frameInd.pos = FramePos::BEFORE;
+      frameInd.ind = 0;
 
-      if (keyFrame1->startValue.vals.empty() || keyFrame1->endValue.vals.empty()) {
-        if (frameInd.ind > 0 && frameInd.ind == int(nf - 1)) {
-          --frameInd.ind;
+      auto rframe = double(frame.frame) + frame.delta;
 
-          keyFrame1 = keyFrames[frameInd.ind];
+      for (uint i = 0; i < nf; ++i) {
+        auto *keyFrame1 = keyFrame(i);
+        auto *keyFrame2 = (i < nf - 1 ? keyFrame(i + 1) : nullptr);
+
+        auto frameStart = keyFrame1->timeFrame().value_or(0.0);
+
+        OptReal frameStop;
+
+        if (keyFrame2)
+          frameStop = keyFrame2->timeFrame().value_or(0.0);
+
+        if (rframe >= frameStart && frameStop && rframe < frameStop.value()) {
+          frameInd.pos = FramePos::INSIDE;
+          frameInd.ind = int(i);
+          break;
+        }
+
+        if (frameStop && rframe >= frameStop.value()) {
+          frameInd.pos = FramePos::AFTER;
+          frameInd.ind = int(i);
         }
       }
 
-      if (keyFrame->startValue.vals.empty() && keyFrame->endValue.vals.empty())
-        return def;
+      assert(frameInd.ind >= 0 && frameInd.ind <= int(nf - 1));
 
-      OptVal v1, v2;
-
-      if (! keyFrame1->startValue.vals.empty())
-        v1 = keyFrame1->startValue.vals[0];
-
-      if (! keyFrame1->endValue.vals.empty())
-        v2 = keyFrame1->endValue.vals[0];
-
-      if (frameInd.pos == FramePos::INSIDE) {
-        if (v1 && v2) {
-          auto dt = CMathUtil::map(frame.frame, frameStart, frameStop, 0.0, 1.0);
-
-          return CLottieUtil::mapValue(dt, *v1, *v2);
-        }
-        else if (v1)
-          return v1;
-        else if (v2)
-          return v2;
-      }
-      else if (frameInd.pos == FramePos::BEFORE) {
-        if (v1)
-          return v1;
-      }
-      else if (frameInd.pos == FramePos::AFTER) {
-        if (v2)
-          return v2;
-      }
-
-      return def;
+      return frameInd;
     }
-#endif
 
    public:
-    bool                     closed { false };
-    std::vector<PointList>   values;
-    std::vector<PointList>   ivalues;
-    std::vector<PointList>   ovalues;
-    std::vector<PointList>   vvalues;
-    std::vector<std::string> interpolation;
-    OptReal                  timeFrame;
-    std::vector<KeyFrame *>  ikeyFrames;
-    std::vector<KeyFrame *>  ekeyFrames;
+    std::vector<KeyFrame *> keyFrames;
   };
 
   //---
@@ -1704,6 +2143,12 @@ class CLottie {
   bool isPrint() const { return print_; }
   void setPrint(bool b) { print_ = b; }
 
+  bool isStats() const { return stats_; }
+  void setStats(bool b) { stats_ = b; }
+
+  bool isQuiet() const { return quiet_; }
+  void setQuiet(bool b) { quiet_ = b; }
+
   //---
 
   CLottieFactory *factory() const { return factory_; }
@@ -1715,6 +2160,8 @@ class CLottie {
   void printLayerHier() const;
 
   void printHier() const;
+
+  void printStats() const;
 
   void reset();
 
@@ -1730,17 +2177,33 @@ class CLottie {
 
   //---
 
+  CLottieAsset *getLayerAsset(const CLottieLayer *layer) const;
+
+  //---
+
+  const Layers &layers() const { return layers_; }
   const Shapes &shapes() const { return shapes_; }
 
   //---
 
   void deselectAll();
 
-  CMatrixStack2D getTransformMatrix(const TimeFrame &timeFrame,
-                                    CLottie::Transform *transform) const;
+  CMatrixStack2D getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform,
+                                    bool autoOrient=false) const;
 
   CMatrixStack2D getRepeaterMatrix(const TimeFrame &timeFrame,
-                              CLottie::Transform *transform, double f) const;
+                                   CLottie::Transform *transform, double f) const;
+
+  CBezierPath getPositionPath(CLottie::Transform *transform) const;
+
+  //---
+
+  bool pathToBezier(const CLottie::BezierProperty &path, const TimeFrame &timeFrame,
+                    CBezierPath &bezierPath) const;
+
+  //---
+
+  CLottieEffect *makeEffect();
 
  private:
   bool readRoot(const std::string &msg, const CJson::ValueP &value);
@@ -1798,6 +2261,8 @@ class CLottie {
   void addMarker(CLottieMarker *marker);
   void addShape (CLottieShape  *shape);
 
+  //---
+
   std::string valueToString(const CJson::ValueP &value, const std::string &def="") const;
   double      valueToReal  (const CJson::ValueP &value, double def=0.0) const;
   int         valueToInt   (const CJson::ValueP &value, int def=0) const;
@@ -1809,12 +2274,21 @@ class CLottie {
   CLottieAsset  *makeAsset ();
   CLottieMarker *makeMarker();
 
-  CLottieEffect      *makeEffect();
   CLottieEffectValue *makeEffectValue();
+
+  //---
+
+  void unhandledName(const std::string &name, const CJson::ValueP &value) const;
+  void todoName(const std::string &msg, const std::string &name, const CJson::ValueP &value) const;
+
+  bool warnValueMsg(const std::string &prefix, const std::string &msg,
+                    const CJson::ValueP &value) const;
 
  private:
   bool debug_ { false };
   bool print_ { false };
+  bool stats_ { false };
+  bool quiet_ { false };
 
   CLottieFactory *factory_ { nullptr };
 
@@ -1834,6 +2308,17 @@ class CLottie {
   Shapes   shapes_;
 
   Markers markers_;
+
+  Effects effects_;
+
+  using LayoutTypeCount = std::map<int, int>;
+  using ShapeTypeCount  = std::map<int, int>;
+  using EffectTypeCount = std::map<int, int>;
+
+  LayoutTypeCount layerTypeCount_;
+  ShapeTypeCount  shapeTypeCount_;
+  EffectTypeCount effectTypeCount_;
+  int             layerMatteCount_ { 0 };
 };
 
 //---
@@ -1880,19 +2365,56 @@ class CLottieObject {
     SHAPE,
     ASSET,
     MARKER,
-    EFFECT
+    EFFECT,
+    REPEATER
+  };
+
+  enum class LayerType {
+    UNKNOWN = -1,
+    PRECOMPOSITION = 0,
+    SOLID = 1,
+    IMAGE = 2,
+    NUL = 3,
+    SHAPE = 4,
+    TEXT = 5,
+    AUDIO = 6,
+    CAMERA = 13,
+    DATA = 15,
+  };
+
+  enum class ShapeType {
+    NONE,
+    ELLIPSE,
+    FILL,
+    GRADIENT_FILL,
+    GROUP,
+    GRADIENT_STROKE,
+    MERGE,
+    OFFSET_PATH,
+    PATH,
+    POLYSTAR,
+    PUCKER_BLOAT,
+    RECTANGLE,
+    REPEATER,
+    ROUNDED,
+    STROKE,
+    TRANSFORM,
+    TRIM,
+    TWIST,
+    ZIGZAG
   };
 
  public:
   static std::string typeName(const Type &type) {
     switch (type) {
-      case Type::ROOT  : return "Root";
-      case Type::LAYER : return "Layer";
-      case Type::SHAPE : return "Shape";
-      case Type::ASSET : return "Asset";
-      case Type::MARKER: return "Marker";
-      case Type::EFFECT: return "Effect";
-      default:           return "None";
+      case Type::ROOT    : return "Root";
+      case Type::LAYER   : return "Layer";
+      case Type::SHAPE   : return "Shape";
+      case Type::ASSET   : return "Asset";
+      case Type::MARKER  : return "Marker";
+      case Type::EFFECT  : return "Effect";
+      case Type::REPEATER: return "Repeater";
+      default:             return "None";
     }
   };
 
@@ -1901,6 +2423,8 @@ class CLottieObject {
   virtual ~CLottieObject();
 
   //---
+
+  CLottie* lottie() const { return lottie_; }
 
   const Type &objectType() const { return objectType_; }
 
@@ -1930,6 +2454,10 @@ class CLottieObject {
   const CBBox2D &bbox() const { return bbox_; }
   void setBBox(const CBBox2D &v) { bbox_ = v; }
 
+  //---
+
+  std::string hierName() const;
+
   bool isHierSelected() const;
 
   //---
@@ -1943,6 +2471,11 @@ class CLottieObject {
   }
 
   //---
+
+  virtual CLottieVariant *getVariant(const std::string &name) {
+    std::cerr << "No variant of name '" << name << "'\n";
+    return nullptr;
+  }
 
   virtual CLottieProperty *getProperty(const std::string &name) const {
     std::cerr << "No property of name '" << name << "'\n";
@@ -2037,6 +2570,19 @@ class CLottieRoot : public CLottieObject {
 
   //---
 
+  CLottieVariant *getVariant(const std::string &name) override {
+    if      (name == "frameStart") {
+      return new CLottieVariantT<OptReal>(&timeFrame_.frameStart);
+    }
+    else if (name == "frameStop") {
+      return new CLottieVariantT<OptReal>(&timeFrame_.frameStop);
+    }
+    else
+      return CLottieObject::getVariant(name);
+  }
+
+  //---
+
   void printI(const std::string &prefix, bool hier) const override;
 
  private:
@@ -2092,7 +2638,10 @@ class CLottieAsset : public CLottieObject {
 
   const Layers &layers() const { return layers_; }
 
+  bool hasLayer(CLottieLayer *layer) const;
   void addLayer(CLottieLayer *layer);
+
+  CLottieLayer *getLayerById(int id) const;
 
   //---
 
@@ -2108,6 +2657,11 @@ class CLottieAsset : public CLottieObject {
   void printI(const std::string &prefix, bool hier) const override;
 
  private:
+  void addLayerId(CLottieLayer *layer);
+
+ private:
+  using LayerMap = std::map<int, CLottieLayer *>;
+
   std::string id_;
 
   OptStr css_;
@@ -2122,15 +2676,30 @@ class CLottieAsset : public CLottieObject {
   Layers layers_;
 
   Layers childLayers_;
+
+  LayerMap layerIds_;
 };
 
 //---
 
 // repeater
-struct CLottieRepeater {
+struct CLottieRepeater : public CLottieObject {
+ public:
+  CLottieRepeater(CLottieShape *shape);
+ ~CLottieRepeater() override;
+
+  CLottieRoot *getRoot() const override;
+
+  CMatrixStack2D calcTransform(const TimeFrame &) const override { return CMatrixStack2D(); }
+
+  void printI(const std::string &prefix, bool hier) const override;
+
+ public:
   using ScalarProperty = CLottie::ScalarProperty;
   using Transform      = CLottie::Transform;
   using OptInt         = std::optional<int>;
+
+  CLottieShape *shape_ { nullptr };
 
   ScalarProperty copies;
   ScalarProperty offset;
@@ -2140,7 +2709,7 @@ struct CLottieRepeater {
   ScalarProperty startOpacity;
   ScalarProperty endOpacity;
 
-  void print(const std::string &prefix="") const;
+  OptInt ind;
 };
 
 //---
@@ -2148,7 +2717,7 @@ struct CLottieRepeater {
 class CLottieEffect : public CLottieObject {
  public:
   CLottieEffect(CLottie *lottie);
- ~CLottieEffect();
+ ~CLottieEffect() override;
 
   const OptInt &type() const { return type_; }
   void setType(const OptInt &v) { type_ = v; }
@@ -2218,11 +2787,14 @@ class CLottieEffectValue {
   ScalarProperty scalar;
   ColorProperty  color;
   VectorProperty point;
+  double         number { 0 };
 
   CLottieEffect* parent { nullptr };
 
   void print(const std::string &prefix="") const;
 };
+
+//---
 
 class CLottieLayer : public CLottieObject {
  public:
@@ -2239,8 +2811,6 @@ class CLottieLayer : public CLottieObject {
 
     void print(const std::string &prefix="") const;
   };
-
-  using Effect = CLottieEffect;
 
   struct Solid {
     OptReal  width;
@@ -2274,6 +2844,9 @@ class CLottieLayer : public CLottieObject {
   CLottieAsset *getParentAsset() const;
 
   //---
+
+  const LayerType &layerType() const { return layerType_; }
+  void setLayerType(const LayerType &t) { layerType_ = t; }
 
   const OptBool &threeD() const { return threeD_; }
   void setThreeD(const OptBool &v) { threeD_ = v; }
@@ -2344,17 +2917,8 @@ class CLottieLayer : public CLottieObject {
     return mask_;
   }
 
-  Effect *effect() const { return effect_; }
-
-  Effect *getEffect() {
-    if (! effect_) {
-      effect_ = new Effect(lottie_);
-
-      effect_->setParent(this);
-    }
-
-    return effect_;
-  }
+  CLottieEffect *effect() const { return effect_; }
+  CLottieEffect *getEffect();
 
   Solid *solid() const { return solid_; }
 
@@ -2389,7 +2953,30 @@ class CLottieLayer : public CLottieObject {
   CMatrixStack2D calcHierTransform(const TimeFrame &timeFrame) const override;
 
   CLottieRepeater *calcRepeater() const;
-  CLottieShape *getRepeaterShape() const;
+
+  CLottieShape *getRepeaterShape      () const;
+  CLottieShape *getTransformShape     () const;
+  CLottieShape *getFillShape          () const;
+  CLottieShape *getStrokeShape        () const;
+  CLottieShape *getGradientFillShape  () const;
+  CLottieShape *getGradientStrokeShape() const;
+  CLottieShape *getMergeShape         () const;
+  CLottieShape *getGeomShape          () const;
+
+  CLottieShape *getShapeOfType(const ShapeType &type, bool hidden=false) const;
+
+  //---
+
+  CLottieVariant *getVariant(const std::string &name) override {
+    if      (name == "frameIn") {
+      return new CLottieVariantT<OptReal>(&frameIn_);
+    }
+    else if (name == "frameOut") {
+      return new CLottieVariantT<OptReal>(&frameOut_);
+    }
+    else
+      return CLottieObject::getVariant(name);
+  }
 
   //---
 
@@ -2442,6 +3029,18 @@ class CLottieLayer : public CLottieObject {
       if (! precomp()) return nullptr;
       return &precomp()->timeRemap;
     }
+    else if (name == "mask.opacity") {
+      if (! mask()) return nullptr;
+      return &mask()->opacity;
+    }
+    else if (name == "mask.path") {
+      if (! mask()) return nullptr;
+      return &mask()->path;
+    }
+    else if (name == "mask.expand") {
+      if (! mask()) return nullptr;
+      return &mask()->expand;
+    }
     else
       return CLottieObject::getProperty(name);
   }
@@ -2455,6 +3054,8 @@ class CLottieLayer : public CLottieObject {
   //---
 
  private:
+  LayerType layerType_ { LayerType::UNKNOWN };
+
   OptStr matchName_;
   OptStr css_;
 
@@ -2482,10 +3083,10 @@ class CLottieLayer : public CLottieObject {
   // transform
   Transform *transform_ { nullptr };
 
-  Mask*    mask_    { nullptr };
-  Effect*  effect_  { nullptr };
-  Solid*   solid_   { nullptr };
-  Precomp* precomp_ { nullptr };
+  Mask*          mask_    { nullptr };
+  CLottieEffect* effect_  { nullptr };
+  Solid*         solid_   { nullptr };
+  Precomp*       precomp_ { nullptr };
 
   Shapes shapes_;
 
@@ -2557,36 +3158,32 @@ class CLottieShape : public CLottieObject {
     void print(const std::string &prefix="") const;
   };
 
-  struct GradientFill {
-    ColorProperty  color;
+  struct GradientBase {
     ScalarProperty opacity;
     OptInt         type;
     OptInt         stopCount;
     OptInt         index;
     VectorProperty startPoint;
     VectorProperty endPoint;
+    ArrayProperty  colors;
+  };
+
+  struct GradientFill : GradientBase {
+    ColorProperty  color;
     ScalarProperty highlightLength;
     ScalarProperty highlightAngle;
     OptInt         fillRule;
     OptInt         blendMode;
-    ArrayProperty  colors;
 
     void print(const std::string &prefix="") const;
   };
 
-  struct GradientStroke {
-    ScalarProperty opacity;
-    OptInt         type;
-    OptInt         stopCount;
-    OptInt         index;
-    VectorProperty startPoint;
-    VectorProperty endPoint;
+  struct GradientStroke : GradientBase {
     ScalarProperty width;
     OptInt         lineCap;
     OptInt         lineJoin;
     OptReal        miterLimit;
     Dash           dash;
-    ArrayProperty  colors;
 
     void print(const std::string &prefix="") const;
   };
@@ -2632,6 +3229,11 @@ class CLottieShape : public CLottieObject {
 
   //---
 
+  const ShapeType &shapeType() const { return shapeType_; }
+  void setShapeType(const ShapeType &t) { shapeType_ = t; }
+
+  //---
+
   CLottieRoot *getRoot() const override;
 
   CLottieLayer *getParentLayer() const;
@@ -2647,17 +3249,28 @@ class CLottieShape : public CLottieObject {
 
   CMatrixStack2D calcTransform(const TimeFrame &) const override;
   CMatrixStack2D calcHierTransform(const TimeFrame &timeFrame) const override;
-  CLottieShape *getTransformShape() const;
 
   Fill *calcFill() const;
-  CLottieShape *getFillShape() const;
 
   CLottieRepeater *calcRepeater() const;
-  CLottieShape *getRepeaterShape() const;
 
   Merge *calcHierMerge() const;
   CLottieShape *calcHierMergeShape() const;
-  CLottieShape *getMergeShape() const;
+
+  CLottieShape *getRepeaterShape      () const;
+  CLottieShape *getTransformShape     () const;
+  CLottieShape *getFillShape          () const;
+  CLottieShape *getStrokeShape        () const;
+  CLottieShape *getGradientFillShape  () const;
+  CLottieShape *getGradientStrokeShape() const;
+  CLottieShape *getMergeShape         () const;
+  CLottieShape *getGeomShape          () const;
+
+  CLottieShape *getShapeOfType(const ShapeType &type, bool hidden=false) const;
+
+  bool isGeomShape() const;
+
+  static const char *shapeTypeName(const ShapeType &shapeType);
 
   //---
 
@@ -2729,7 +3342,7 @@ class CLottieShape : public CLottieObject {
 
   CLottieRepeater *getRepeater() {
     if (! repeater_)
-      repeater_ = new CLottieRepeater;
+      repeater_ = new CLottieRepeater(this);
     return repeater_;
   }
 
@@ -2920,13 +3533,37 @@ class CLottieShape : public CLottieObject {
       if (! gradientStroke()) return nullptr;
       return &gradientStroke()->dash.value;
     }
-    else if (name == "repeater.transform.anchorPoint") {
+    else if (name == "repeater.copies") {
+      if (! repeater()) return nullptr;
+      return &repeater()->copies;
+    }
+    else if (name == "repeater.offset") {
+      if (! repeater()) return nullptr;
+      return &repeater()->offset;
+    }
+    else if (name == "repeater.startOpacity") {
+      if (! repeater()) return nullptr;
+      return &repeater()->startOpacity;
+    }
+    else if (name == "repeater.endOpacity") {
+      if (! repeater()) return nullptr;
+      return &repeater()->endOpacity;
+    }
+    else if (name =="repeater.transform.anchorPoint") {
       if (! repeater() || ! repeater()->transform) return nullptr;
       return &repeater()->transform->anchorPoint;
     }
     else if (name == "repeater.transform.position") {
       if (! repeater() || ! repeater()->transform) return nullptr;
       return &repeater()->transform->position;
+    }
+    else if (name == "repeater.transform.rotation") {
+      if (! repeater() || ! repeater()->transform) return nullptr;
+      return &repeater()->transform->rotation;
+    }
+    else if (name == "repeater.transform.scale") {
+      if (! repeater() || ! repeater()->transform) return nullptr;
+      return &repeater()->transform->scale;
     }
     else if (name == "rectangle.roundness") {
       if (! rectangle()) return nullptr;
@@ -2972,10 +3609,17 @@ class CLottieShape : public CLottieObject {
       if (! polyStar()) return nullptr;
       return &polyStar()->points;
     }
-
+    else if (name == "rounded.roundness") {
+      if (! rounded()) return nullptr;
+      return &rounded()->roundness;
+    }
     else
       return CLottieObject::getProperty(name);
   }
+
+  //---
+
+//CBezierPath getBezierPath() const;
 
   //---
 
@@ -2990,6 +3634,8 @@ class CLottieShape : public CLottieObject {
   Transform *transform_ { nullptr };
 
  public:
+  ShapeType shapeType_ { ShapeType::NONE };
+
   // style
   PositionProperty pos_;
   SizeProperty     size_;

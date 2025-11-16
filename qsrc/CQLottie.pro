@@ -22,6 +22,11 @@ CQLottieSettings.cpp \
 CQLottieToolBar.cpp \
 CQLottieStatusBar.cpp \
 CQLottieTimeLine.cpp \
+CQLottiePath.cpp \
+CQLottieImage.cpp \
+\
+CQImageDisplay.cpp \
+QPainterPathUtil.cpp \
 
 HEADERS += \
 CQLottieMain.h \
@@ -32,6 +37,11 @@ CQLottieSettings.h \
 CQLottieToolBar.h \
 CQLottieStatusBar.h \
 CQLottieTimeLine.h \
+CQLottiePath.h \
+CQLottieImage.h \
+\
+CQImageDisplay.h \
+QPainterPathUtil.h \
 
 OBJECTS_DIR = ../obj
 

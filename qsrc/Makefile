@@ -59,13 +59,20 @@ SOURCES       = CQLottieMain.cpp \
 		CQLottieSettings.cpp \
 		CQLottieToolBar.cpp \
 		CQLottieStatusBar.cpp \
-		CQLottieTimeLine.cpp .moc/moc_CQLottie.cpp \
+		CQLottieTimeLine.cpp \
+		CQLottiePath.cpp \
+		CQLottieImage.cpp \
+		CQImageDisplay.cpp \
+		QPainterPathUtil.cpp .moc/moc_CQLottie.cpp \
 		.moc/moc_CQLottieCanvas.cpp \
 		.moc/moc_CQLottieTree.cpp \
 		.moc/moc_CQLottieSettings.cpp \
 		.moc/moc_CQLottieToolBar.cpp \
 		.moc/moc_CQLottieStatusBar.cpp \
-		.moc/moc_CQLottieTimeLine.cpp
+		.moc/moc_CQLottieTimeLine.cpp \
+		.moc/moc_CQLottiePath.cpp \
+		.moc/moc_CQLottieImage.cpp \
+		.moc/moc_CQImageDisplay.cpp
 OBJECTS       = ../obj/CQLottieMain.o \
 		../obj/CQLottie.o \
 		../obj/CQLottieCanvas.o \
@@ -74,13 +81,20 @@ OBJECTS       = ../obj/CQLottieMain.o \
 		../obj/CQLottieToolBar.o \
 		../obj/CQLottieStatusBar.o \
 		../obj/CQLottieTimeLine.o \
+		../obj/CQLottiePath.o \
+		../obj/CQLottieImage.o \
+		../obj/CQImageDisplay.o \
+		../obj/QPainterPathUtil.o \
 		../obj/moc_CQLottie.o \
 		../obj/moc_CQLottieCanvas.o \
 		../obj/moc_CQLottieTree.o \
 		../obj/moc_CQLottieSettings.o \
 		../obj/moc_CQLottieToolBar.o \
 		../obj/moc_CQLottieStatusBar.o \
-		../obj/moc_CQLottieTimeLine.o
+		../obj/moc_CQLottieTimeLine.o \
+		../obj/moc_CQLottiePath.o \
+		../obj/moc_CQLottieImage.o \
+		../obj/moc_CQImageDisplay.o
 DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/common/unix.conf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/common/linux.conf \
@@ -181,14 +195,22 @@ DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		CQLottieSettings.h \
 		CQLottieToolBar.h \
 		CQLottieStatusBar.h \
-		CQLottieTimeLine.h CQLottieMain.cpp \
+		CQLottieTimeLine.h \
+		CQLottiePath.h \
+		CQLottieImage.h \
+		CQImageDisplay.h \
+		QPainterPathUtil.h CQLottieMain.cpp \
 		CQLottie.cpp \
 		CQLottieCanvas.cpp \
 		CQLottieTree.cpp \
 		CQLottieSettings.cpp \
 		CQLottieToolBar.cpp \
 		CQLottieStatusBar.cpp \
-		CQLottieTimeLine.cpp
+		CQLottieTimeLine.cpp \
+		CQLottiePath.cpp \
+		CQLottieImage.cpp \
+		CQImageDisplay.cpp \
+		QPainterPathUtil.cpp
 QMAKE_TARGET  = CQLottie
 DESTDIR       = ../bin/
 TARGET        = ../bin/CQLottie
@@ -405,8 +427,8 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents CQLottieMain.h CQLottie.h CQLottieCanvas.h CQLottieTree.h CQLottieSettings.h CQLottieToolBar.h CQLottieStatusBar.h CQLottieTimeLine.h $(DISTDIR)/
-	$(COPY_FILE) --parents CQLottieMain.cpp CQLottie.cpp CQLottieCanvas.cpp CQLottieTree.cpp CQLottieSettings.cpp CQLottieToolBar.cpp CQLottieStatusBar.cpp CQLottieTimeLine.cpp $(DISTDIR)/
+	$(COPY_FILE) --parents CQLottieMain.h CQLottie.h CQLottieCanvas.h CQLottieTree.h CQLottieSettings.h CQLottieToolBar.h CQLottieStatusBar.h CQLottieTimeLine.h CQLottiePath.h CQLottieImage.h CQImageDisplay.h QPainterPathUtil.h $(DISTDIR)/
+	$(COPY_FILE) --parents CQLottieMain.cpp CQLottie.cpp CQLottieCanvas.cpp CQLottieTree.cpp CQLottieSettings.cpp CQLottieToolBar.cpp CQLottieStatusBar.cpp CQLottieTimeLine.cpp CQLottiePath.cpp CQLottieImage.cpp CQImageDisplay.cpp QPainterPathUtil.cpp $(DISTDIR)/
 
 
 clean: compiler_clean 
@@ -438,9 +460,9 @@ compiler_moc_predefs_clean:
 .moc/moc_predefs.h: /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp
 	g++ -pipe -std=c++17 -O2 -std=gnu++1z -Wall -Wextra -dM -E -o .moc/moc_predefs.h /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp
 
-compiler_moc_header_make_all: .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp
+compiler_moc_header_make_all: .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp
 compiler_moc_header_clean:
-	-$(DEL_FILE) .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp
+	-$(DEL_FILE) .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp
 .moc/moc_CQLottie.cpp: CQLottie.h \
 		../include/CLottie.h \
 		../../CJson/include/CJson.h \
@@ -453,9 +475,13 @@ compiler_moc_header_clean:
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -484,9 +510,13 @@ compiler_moc_header_clean:
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -529,6 +559,33 @@ compiler_moc_header_clean:
 		/usr/lib/qt5/bin/moc
 	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQLottieTimeLine.h -o .moc/moc_CQLottieTimeLine.cpp
 
+.moc/moc_CQLottiePath.cpp: CQLottiePath.h \
+		../../CUtil/include/CDisplayRange2D.h \
+		../../CMath/include/CMathRound.h \
+		../../CMath/include/CMatrix2D.h \
+		../../CMath/include/CPoint2D.h \
+		../../CMath/include/CVector2D.h \
+		../../CMath/include/CMathGen.h \
+		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CMathUtil.h \
+		../../COS/include/COSNaN.h \
+		../../CMath/include/CBBox2D.h \
+		../../CMath/include/CSize2D.h \
+		../../CMath/include/CISize2D.h \
+		.moc/moc_predefs.h \
+		/usr/lib/qt5/bin/moc
+	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQLottiePath.h -o .moc/moc_CQLottiePath.cpp
+
+.moc/moc_CQLottieImage.cpp: CQLottieImage.h \
+		.moc/moc_predefs.h \
+		/usr/lib/qt5/bin/moc
+	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQLottieImage.h -o .moc/moc_CQLottieImage.cpp
+
+.moc/moc_CQImageDisplay.cpp: CQImageDisplay.h \
+		.moc/moc_predefs.h \
+		/usr/lib/qt5/bin/moc
+	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQImageDisplay.h -o .moc/moc_CQImageDisplay.cpp
+
 compiler_moc_objc_header_make_all:
 compiler_moc_objc_header_clean:
 compiler_moc_source_make_all:
@@ -558,9 +615,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -581,9 +642,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -594,13 +659,11 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		CQLottieToolBar.h \
 		CQLottieStatusBar.h \
 		CQLottieTimeLine.h \
+		CQLottiePath.h \
 		CQLottieTree.h \
 		CQLottieSettings.h \
+		QPainterPathUtil.h \
 		../../CUtil/include/CEncode64.h \
-		../../CMath/include/CBezierPath.h \
-		../../CMath/include/C3Bezier2D.h \
-		../../CMath/include/C2Bezier2D.h \
-		../../CMath/include/CArcToBezier.h \
 		svg/play_svg.h \
 		../../CQUtil/include/CQPixmapCache.h \
 		svg/pause_svg.h \
@@ -621,9 +684,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -645,9 +712,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -656,10 +727,11 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CDisplayRange2D.h \
 		CQLottieCanvas.h \
 		CQLottieTimeLine.h \
+		CQLottiePath.h \
+		CQLottieImage.h \
 		../../CQUtil/include/CQMatrixStack2D.h \
 		../../CQUtil/include/CQRealSpin.h \
-		../../CQUtil/include/CQColorChooser.h \
-		../../CQUtil/include/CQLabelImage.h
+		../../CQUtil/include/CQColorChooser.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieTree.o CQLottieTree.cpp
 
 ../obj/CQLottieSettings.o: CQLottieSettings.cpp CQLottieSettings.h \
@@ -675,9 +747,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -702,16 +778,23 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
-		../../CQUtil/include/CQIconButton.h
+		../../CQUtil/include/CQIconButton.h \
+		../../CQUtil/include/CQSlider.h \
+		../../CQUtil/include/CQUtil.h \
+		../../CQUtil/include/CQUtilMeta.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieToolBar.o CQLottieToolBar.cpp
 
 ../obj/CQLottieStatusBar.o: CQLottieStatusBar.cpp CQLottieStatusBar.h \
@@ -727,9 +810,13 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CMath/include/CVector2D.h \
 		../../CMath/include/CMathGen.h \
 		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
 		../../CMath/include/CBBox2D.h \
 		../../CMath/include/CSize2D.h \
 		../../CMath/include/CISize2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -755,6 +842,10 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../include/CLottie.h \
 		../../CJson/include/CJson.h \
 		../../CMath/include/CMatrixStack2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
+		../../CMath/include/CArcToBezier.h \
 		../../CStrUtil/include/CStrUtil.h \
 		../../CUtil/include/CRGBA.h \
 		../../CUtil/include/CRGB.h \
@@ -762,6 +853,50 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CUtil.h \
 		CQLottieStatusBar.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieTimeLine.o CQLottieTimeLine.cpp
+
+../obj/CQLottiePath.o: CQLottiePath.cpp CQLottiePath.h \
+		../../CUtil/include/CDisplayRange2D.h \
+		../../CMath/include/CMathRound.h \
+		../../CMath/include/CMatrix2D.h \
+		../../CMath/include/CPoint2D.h \
+		../../CMath/include/CVector2D.h \
+		../../CMath/include/CMathGen.h \
+		../../CMath/include/CIPoint2D.h \
+		../../CMath/include/CMathUtil.h \
+		../../COS/include/COSNaN.h \
+		../../CMath/include/CBBox2D.h \
+		../../CMath/include/CSize2D.h \
+		../../CMath/include/CISize2D.h \
+		CQLottie.h \
+		../include/CLottie.h \
+		../../CJson/include/CJson.h \
+		../../CMath/include/CMatrixStack2D.h \
+		../../CMath/include/CBezierPath.h \
+		../../CMath/include/C3Bezier2D.h \
+		../../CMath/include/C2Bezier2D.h \
+		../../CMath/include/CArcToBezier.h \
+		../../CStrUtil/include/CStrUtil.h \
+		../../CUtil/include/CRGBA.h \
+		../../CUtil/include/CRGB.h \
+		../../CUtil/include/CRGBName.h \
+		../../CUtil/include/CUtil.h \
+		CQLottieStatusBar.h \
+		../../CQUtil/include/CQColorEdit.h \
+		../../CQUtil/include/CQRealSpin.h \
+		../../CQUtil/include/CQUtil.h \
+		../../CQUtil/include/CQUtilMeta.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottiePath.o CQLottiePath.cpp
+
+../obj/CQLottieImage.o: CQLottieImage.cpp CQLottieImage.h \
+		CQImageDisplay.h \
+		../../CQUtil/include/CQColorChooser.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieImage.o CQLottieImage.cpp
+
+../obj/CQImageDisplay.o: CQImageDisplay.cpp CQImageDisplay.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQImageDisplay.o CQImageDisplay.cpp
+
+../obj/QPainterPathUtil.o: QPainterPathUtil.cpp QPainterPathUtil.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/QPainterPathUtil.o QPainterPathUtil.cpp
 
 ../obj/moc_CQLottie.o: .moc/moc_CQLottie.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQLottie.o .moc/moc_CQLottie.cpp
@@ -783,6 +918,15 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ../obj/moc_CQLottieTimeLine.o: .moc/moc_CQLottieTimeLine.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQLottieTimeLine.o .moc/moc_CQLottieTimeLine.cpp
+
+../obj/moc_CQLottiePath.o: .moc/moc_CQLottiePath.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQLottiePath.o .moc/moc_CQLottiePath.cpp
+
+../obj/moc_CQLottieImage.o: .moc/moc_CQLottieImage.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQLottieImage.o .moc/moc_CQLottieImage.cpp
+
+../obj/moc_CQImageDisplay.o: .moc/moc_CQImageDisplay.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQImageDisplay.o .moc/moc_CQImageDisplay.cpp
 
 ####### Install
 

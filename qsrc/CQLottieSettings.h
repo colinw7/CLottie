@@ -4,6 +4,7 @@
 #include <QFrame>
 
 class CQLottie;
+
 class CQColorEdit;
 class QCheckBox;
 
@@ -13,6 +14,10 @@ class CQLottieSettings : public QFrame {
  public:
   CQLottieSettings(CQLottie *lottie);
 
+ private:
+  void connectSlots(bool b);
+  void updateWidgets();
+
  private Q_SLOTS:
   void equalScaleSlot(int);
   void bgFillSlot(const QColor &);
@@ -21,10 +26,6 @@ class CQLottieSettings : public QFrame {
   void selectedStrokeSlot(const QColor &);
   void showBBoxSlot(int);
   void bboxStrokeSlot(const QColor &);
-
- private:
-  void connectSlots(bool b);
-  void updateWidgets();
 
  private:
   CQLottie *lottie_ { nullptr };

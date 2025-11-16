@@ -22,8 +22,8 @@ QT_BEGIN_MOC_NAMESPACE
 QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
 struct qt_meta_stringdata_CQLottieTree_t {
-    QByteArrayData data[16];
-    char stringdata0[193];
+    QByteArrayData data[17];
+    char stringdata0[202];
 };
 #define QT_MOC_LITERAL(idx, ofs, len) \
     Q_STATIC_BYTE_ARRAY_DATA_HEADER_INITIALIZER_WITH_OFFSET(len, \
@@ -46,8 +46,9 @@ QT_MOC_LITERAL(10, 116, 15), // "collapseAllSlot"
 QT_MOC_LITERAL(11, 132, 8), // "bboxSlot"
 QT_MOC_LITERAL(12, 141, 13), // "transformSlot"
 QT_MOC_LITERAL(13, 155, 17), // "hierTransformSlot"
-QT_MOC_LITERAL(14, 173, 9), // "imageSlot"
-QT_MOC_LITERAL(15, 183, 9) // "printSlot"
+QT_MOC_LITERAL(14, 173, 8), // "zoomSlot"
+QT_MOC_LITERAL(15, 182, 9), // "imageSlot"
+QT_MOC_LITERAL(16, 192, 9) // "printSlot"
 
     },
     "CQLottieTree\0itemClickedSlot\0\0"
@@ -55,7 +56,7 @@ QT_MOC_LITERAL(15, 183, 9) // "printSlot"
     "itemSelectedSlot\0customContextMenuSlot\0"
     "pos\0expandAllSlot\0collapseAllSlot\0"
     "bboxSlot\0transformSlot\0hierTransformSlot\0"
-    "imageSlot\0printSlot"
+    "zoomSlot\0imageSlot\0printSlot"
 };
 #undef QT_MOC_LITERAL
 
@@ -65,7 +66,7 @@ static const uint qt_meta_data_CQLottieTree[] = {
        8,       // revision
        0,       // classname
        0,    0, // classinfo
-      10,   14, // methods
+      11,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -73,21 +74,23 @@ static const uint qt_meta_data_CQLottieTree[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags
-       1,    2,   64,    2, 0x08 /* Private */,
-       6,    2,   69,    2, 0x08 /* Private */,
-       7,    1,   74,    2, 0x08 /* Private */,
-       9,    0,   77,    2, 0x08 /* Private */,
-      10,    0,   78,    2, 0x08 /* Private */,
-      11,    0,   79,    2, 0x08 /* Private */,
-      12,    0,   80,    2, 0x08 /* Private */,
-      13,    0,   81,    2, 0x08 /* Private */,
-      14,    0,   82,    2, 0x08 /* Private */,
-      15,    0,   83,    2, 0x08 /* Private */,
+       1,    2,   69,    2, 0x08 /* Private */,
+       6,    2,   74,    2, 0x08 /* Private */,
+       7,    1,   79,    2, 0x08 /* Private */,
+       9,    0,   82,    2, 0x08 /* Private */,
+      10,    0,   83,    2, 0x08 /* Private */,
+      11,    0,   84,    2, 0x08 /* Private */,
+      12,    0,   85,    2, 0x08 /* Private */,
+      13,    0,   86,    2, 0x08 /* Private */,
+      14,    0,   87,    2, 0x08 /* Private */,
+      15,    0,   88,    2, 0x08 /* Private */,
+      16,    0,   89,    2, 0x08 /* Private */,
 
  // slots: parameters
     QMetaType::Void, 0x80000000 | 3, QMetaType::Int,    4,    5,
     QMetaType::Void, 0x80000000 | 3, 0x80000000 | 3,    2,    2,
     QMetaType::Void, QMetaType::QPoint,    8,
+    QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -113,8 +116,9 @@ void CQLottieTree::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id
         case 5: _t->bboxSlot(); break;
         case 6: _t->transformSlot(); break;
         case 7: _t->hierTransformSlot(); break;
-        case 8: _t->imageSlot(); break;
-        case 9: _t->printSlot(); break;
+        case 8: _t->zoomSlot(); break;
+        case 9: _t->imageSlot(); break;
+        case 10: _t->printSlot(); break;
         default: ;
         }
     }
@@ -149,13 +153,13 @@ int CQLottieTree::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 10)
+        if (_id < 11)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 10;
+        _id -= 11;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 10)
+        if (_id < 11)
             *reinterpret_cast<int*>(_a[0]) = -1;
-        _id -= 10;
+        _id -= 11;
     }
     return _id;
 }

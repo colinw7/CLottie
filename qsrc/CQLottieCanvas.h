@@ -24,6 +24,9 @@ class CQLottieCanvas : public QWidget {
 
   QSize sizeHint() const override { return QSize(1600, 1600); }
 
+ private Q_SLOTS:
+  void customContextMenuSlot(const QPoint &);
+
  private:
   CQLottie* lottie_ { nullptr };
 

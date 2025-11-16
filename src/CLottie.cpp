@@ -1,14 +1,7 @@
 #include <CLottie.h>
 #include <CRGBName.h>
 
-namespace {
-
-std::string depthStr(uint depth) {
-  std::string str;
-  for (uint i = 0; i < depth; ++i)
-    str += "  ";
-  return str;
-}
+namespace CLottieUtil {
 
 void unhandledName(const std::string &name, const CJson::ValueP &value) {
   std::cout << "Unhandled: " << name << "=" << *value << "\n";
@@ -18,6 +11,22 @@ void todoName(const std::string &msg, const std::string &name, const CJson::Valu
   std::cout << "TODO: " << msg << " " << name << "=" << *value << "\n";
 }
 
+bool warnValueMsg(const std::string &prefix, const std::string &msg, const CJson::ValueP &value) {
+  std::cerr << "Warning: " << prefix << " : " << msg << "(" << *value << ")\n";
+  return false;
+}
+
+}
+
+namespace {
+
+std::string depthStr(uint depth) {
+  std::string str;
+  for (uint i = 0; i < depth; ++i)
+    str += "  ";
+  return str;
+}
+
 bool errorMsg(const std::string &prefix, const std::string &msg) {
   std::cerr << "Error: " << prefix << " : " << msg << "\n";
   return false;
@@ -25,11 +34,6 @@ bool errorMsg(const std::string &prefix, const std::string &msg) {
 
 bool errorValueMsg(const std::string &prefix, const std::string &msg, const CJson::ValueP &value) {
   std::cerr << "Error: " << prefix << " : " << msg << "(" << *value << ")\n";
-  return false;
-}
-
-bool warnValueMsg(const std::string &prefix, const std::string &msg, const CJson::ValueP &value) {
-  std::cerr << "Warning: " << prefix << " : " << msg << "(" << *value << ")\n";
   return false;
 }
 
@@ -122,12 +126,26 @@ load(const std::string &file)
     return errorMsg("", "readRoot");
 
   buildLayerHier();
-  printLayerHier();
 
   if (isPrint()) {
     printLayerHier();
 
     printHier();
+  }
+
+  if (isStats()) {
+    for (auto *layer : layers_) {
+      layerTypeCount_[static_cast<int>(layer->layerType())]++;
+
+      if (layer->matteTarget())
+        layerMatteCount_++;
+    }
+
+    for (auto *shape : shapes_)
+      shapeTypeCount_[static_cast<int>(shape->shapeType())]++;
+
+    for (auto *effect : effects_)
+      effectTypeCount_[static_cast<int>(effect->type().value_or(0))]++;
   }
 
   return true;
@@ -169,6 +187,33 @@ printHier() const
   root_->printHier();
 }
 
+void
+CLottie::
+printStats() const
+{
+  for (const auto &pl : layerTypeCount_) {
+    //auto layerType = static_cast<CLottieObject::LayerType>(pl.first);
+    const char *str = CLottieLayer::typeIdName(pl.first);
+
+    std::cerr << "Layer: " << str << " " << pl.second << "\n";
+  }
+
+  if (layerMatteCount_ > 0)
+    std::cerr << "Matte Layers: " << layerMatteCount_ << "\n";
+
+  for (const auto &ps : shapeTypeCount_) {
+    auto shapeType = static_cast<CLottieObject::ShapeType>(ps.first);
+
+    std::cerr << "Shape: " << CLottieShape::shapeTypeName(shapeType) << " " << ps.second << "\n";
+  }
+
+  for (const auto &pe : effectTypeCount_) {
+    auto effectType = pe.first;
+
+    std::cerr << "Effect: " << effectType << " " << pe.second << "\n";
+  }
+}
+
 CLottieAsset *
 CLottie::
 getAssetById(const std::string &id) const
@@ -187,14 +232,14 @@ CLottieLayer *
 CLottie::
 getLayerById(int id) const
 {
-  auto pl = layerIds_.find(id);
+  auto pl1 = layerIds_.find(id);
 
-  if (pl == layerIds_.end()) {
-    std::cerr << "Failed to find layer id : " << id << "\n";
-    return nullptr;
-  }
+  if (pl1 != layerIds_.end())
+    return (*pl1).second;
 
-  return (*pl).second;
+  std::cerr << "Failed to find layer id : " << id << "\n";
+
+  return nullptr;
 }
 
 void
@@ -394,6 +439,15 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
 
     layer->setTypeId(valueToInt(value1));
 
+    switch (layer->typeId().value()) {
+      case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 13: case 15:
+        layer->setLayerType(static_cast<CLottieObject::LayerType>(layer->typeId().value()));
+        break;
+      default:
+        layer->setLayerType(CLottieObject::LayerType::UNKNOWN);
+        break;
+    }
+
     break;
   }
 
@@ -474,6 +528,8 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
 
       if (! readEffect(msg1, value1, effect))
         return false;
+
+      effects_.push_back(effect);
     }
     else if (name == "mb") { // motion blur
       todoName(msg1, name, value1);
@@ -702,8 +758,10 @@ addLayerId(CLottieLayer *layer)
 
   auto pl = layerIds_.find(ind);
 
-  if (pl != layerIds_.end())
-    std::cerr << "Duplicate layer ind " << ind << "\n";
+  if (pl != layerIds_.end()) {
+    if (! isQuiet())
+      std::cerr << "Duplicate layer ind " << ind << "\n";
+  }
 
   layerIds_[ind] = layer;
 }
@@ -971,6 +1029,21 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
           else
             todoName(msg1, efname, efValue1);
         }
+        else if (effectValue->type == 4) { // checkbox
+          if (efname == "v") {
+            if (! readVectorProperty(msg1, efValue1, effectValue->point))
+              (void) errorMsg(msg1, "readVectorProperty");
+          }
+          else
+            todoName(msg1, efname, efValue1);
+        }
+        else if (effectValue->type == 6) { // ignored
+          if (efname == "v") {
+            effectValue->number = valueToReal(efValue1);
+          }
+          else
+            todoName(msg1, efname, efValue1);
+        }
         else if (effectValue->type == 7) { // drop down
           if (efname == "v") {
             if (! readScalarProperty(msg1, efValue1, effectValue->scalar))
@@ -1022,6 +1095,53 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
     break;
   }
 
+  auto typeName = shape->type().value_or("");
+
+  //---
+
+  if      (typeName == "el")
+    shape->setShapeType(CLottieShape::ShapeType::ELLIPSE);
+  else if (typeName == "fl")
+    shape->setShapeType(CLottieShape::ShapeType::FILL);
+  else if (typeName == "gf")
+    shape->setShapeType(CLottieShape::ShapeType::GRADIENT_FILL);
+  else if (typeName == "gr")
+    shape->setShapeType(CLottieShape::ShapeType::GROUP);
+  else if (typeName == "gs")
+    shape->setShapeType(CLottieShape::ShapeType::GRADIENT_STROKE);
+  else if (typeName == "mm")
+    shape->setShapeType(CLottieShape::ShapeType::MERGE);
+  else if (typeName == "no")
+    shape->setShapeType(CLottieShape::ShapeType::NONE);
+  else if (typeName == "op")
+    shape->setShapeType(CLottieShape::ShapeType::OFFSET_PATH);
+  else if (typeName == "sh")
+    shape->setShapeType(CLottieShape::ShapeType::PATH);
+  else if (typeName == "sr")
+    shape->setShapeType(CLottieShape::ShapeType::POLYSTAR);
+  else if (typeName == "pb")
+    shape->setShapeType(CLottieShape::ShapeType::PUCKER_BLOAT);
+  else if (typeName == "rc")
+    shape->setShapeType(CLottieShape::ShapeType::RECTANGLE);
+  else if (typeName == "rp")
+    shape->setShapeType(CLottieShape::ShapeType::REPEATER);
+  else if (typeName == "rd")
+    shape->setShapeType(CLottieShape::ShapeType::ROUNDED);
+  else if (typeName == "st")
+    shape->setShapeType(CLottieShape::ShapeType::STROKE);
+  else if (typeName == "tr")
+    shape->setShapeType(CLottieShape::ShapeType::TRANSFORM);
+  else if (typeName == "tm")
+    shape->setShapeType(CLottieShape::ShapeType::TRIM);
+  else if (typeName == "tw")
+    shape->setShapeType(CLottieShape::ShapeType::TWIST);
+  else if (typeName == "zz")
+    shape->setShapeType(CLottieShape::ShapeType::ZIGZAG);
+
+  //auto shapeType = shape->shapeType();
+
+  //---
+
   // get remaining values
   for (const auto &name : names) {
     auto msg1 = msg + "/" + name;
@@ -1055,10 +1175,8 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
       shape->setInd(valueToInt(value1));
     }
     else {
-      auto type = shape->type().value_or("");
-
       // ellipse
-      if      (type == "el") {
+      if      (typeName == "el") {
         if      (name == "p") { // position
           if (! readPositionProperty(msg1, value1, shape->pos_))
             return errorMsg(msg1, "readPositionProperty");
@@ -1086,7 +1204,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // fill
-      else if (type == "fl") {
+      else if (typeName == "fl") {
         auto *fill = shape->getFill();
 
         if      (name == "c") { // color
@@ -1113,7 +1231,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // gradient fill
-      else if (type == "gf") {
+      else if (typeName == "gf") {
         auto *gradientFill = shape->getGradientFill();
 
         if      (name == "c") { // color
@@ -1201,10 +1319,14 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                         kObj1->getNamedValue(kname1, kvalue2);
 
                         if      (kname1 == "i") { // input
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ivalues_);
+                          std::vector<XYVals> ivalues;
+                          if (getKeyFrameValues(msg2, kname1, kvalue2, ivalues))
+                            keyFrame->setIValues(ivalues);
                         }
                         else if (kname1 == "o") { // output
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ovalues_);
+                          std::vector<XYVals> ovalues;
+                          if (getKeyFrameValues(msg2, kname1, kvalue2, ovalues))
+                            keyFrame->setOValues(ovalues);
                         }
                         else if (kname1 == "s") { // start value
                           std::vector<double> startValue;
@@ -1219,11 +1341,13 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                           keyFrame->endValue.vals.push_back(endValue);
                         }
                         else if (kname1 == "n") { // interpolation key
-                          if (! readStrings(msg2, kvalue2, keyFrame->interpolation_))
+                          CLottieKeyFrame::Interpolations interpolation;
+                          if (! readStrings(msg2, kvalue2, interpolation))
                             return errorMsg(msg2, "readStrings");
+                          keyFrame->setInterpolation(interpolation);
                         }
-                        else if (kname1 == "t") { // ???
-                          keyFrame->timeFrame_ = valueToReal(kvalue2);
+                        else if (kname1 == "t") { // time frame
+                          keyFrame->setTimeFrame(valueToReal(kvalue2));
                         }
                         else
                           unhandledName(kname1, kvalue2);
@@ -1279,7 +1403,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // group
-      else if (type == "gr") {
+      else if (typeName == "gr") {
         auto *group = shape->getGroup();
 
         if      (name == "np") { // number of properties
@@ -1334,7 +1458,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // gradient stroke
-      else if (type == "gs") {
+      else if (typeName == "gs") {
         auto *gradientStroke = shape->getGradientStroke();
 
         if      (name == "o") { // opacity
@@ -1416,10 +1540,14 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                         kObj1->getNamedValue(kname1, kvalue2);
 
                         if      (kname1 == "i") { // input
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ivalues_);
+                          std::vector<XYVals> ivalues;
+                          if (getKeyFrameValues(msg2, kname1, kvalue2, ivalues))
+                            keyFrame->setIValues(ivalues);
                         }
                         else if (kname1 == "o") { // output
-                          getKeyFrameValues(msg2, kname1, kvalue2, keyFrame->ovalues_);
+                          std::vector<XYVals> ovalues;
+                          if (getKeyFrameValues(msg2, kname1, kvalue2, ovalues))
+                            keyFrame->setOValues(ovalues);
                         }
                         else if (kname1 == "s") { // start value
                           std::vector<double> startValue;
@@ -1430,15 +1558,17 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
                         else if (kname1 == "e") { // end value
                           std::vector<double> endValue;
                           if (! readNumbers(msg2, kvalue2, endValue))
-                            return errorMsg(msg2, "readVector");
+                            return errorMsg(msg2, "readNumbers");
                           keyFrame->endValue.vals.push_back(endValue);
                         }
                         else if (kname1 == "n") { // interpolation key
-                          if (! readStrings(msg2, kvalue2, keyFrame->interpolation_))
+                          CLottieKeyFrame::Interpolations interpolation;
+                          if (! readStrings(msg2, kvalue2, interpolation))
                             return errorMsg(msg2, "readStrings");
+                          keyFrame->setInterpolation(interpolation);
                         }
-                        else if (kname1 == "t") { // ???
-                          keyFrame->timeFrame_ = valueToReal(kvalue2);
+                        else if (kname1 == "t") { // time frame
+                          keyFrame->setTimeFrame(valueToReal(kvalue2));
                         }
                         else
                           unhandledName(kname1, kvalue2);
@@ -1469,7 +1599,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           }
         }
         else if (name == "s") { // start point
-          if (! readVectorProperty(msg1, value1, gradientStroke->endPoint))
+          if (! readVectorProperty(msg1, value1, gradientStroke->startPoint))
             return errorMsg(msg1, "readVectorProperty");
         }
         else if (name == "e") { // end point
@@ -1497,7 +1627,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // merge path
-      else if (type == "mm") {
+      else if (typeName == "mm") {
         auto *merge = shape->getMerge();
 
         if      (name == "mm") { // merge mode
@@ -1510,15 +1640,15 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // no style
-      else if (type == "no") {
+      else if (typeName == "no") {
         unhandledName(name, value1);
       }
       // offset path
-      else if (type == "op") {
+      else if (typeName == "op") {
         unhandledName(name, value1);
       }
       // path
-      else if (type == "sh") {
+      else if (typeName == "sh") {
         if      (name == "ks") { // bezier path
           if (! readBezierProperty(msg1, value1, shape->path_))
             return errorMsg(msg1, "readBezierProperty");
@@ -1534,7 +1664,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // polystar
-      else if (type == "sr") {
+      else if (typeName == "sr") {
         auto *polyStar = shape->getPolyStar();
 
         if      (name == "p") { // position
@@ -1587,11 +1717,11 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // pucker bloat
-      else if (type == "pb") {
+      else if (typeName == "pb") {
         unhandledName(name, value1);
       }
       // rectangle
-      else if (type == "rc") {
+      else if (typeName == "rc") {
         auto *rectangle = shape->getRectangle();
 
         if      (name == "p") { // position
@@ -1625,7 +1755,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // repeater
-      else if (type == "rp") {
+      else if (typeName == "rp") {
         auto *repeater = shape->getRepeater();
 
         if      (name == "c") { // copies
@@ -1655,7 +1785,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // rounded corners
-      else if (type == "rd") {
+      else if (typeName == "rd") {
         auto *rounded = shape->getRounded();
 
         if      (name == "r") {
@@ -1669,7 +1799,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // stroke
-      else if (type == "st") {
+      else if (typeName == "st") {
         auto *stroke = shape->getStroke();
 
         if      (name == "c") { // color
@@ -1708,7 +1838,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // transform
-      else if (type == "tr") {
+      else if (typeName == "tr") {
         auto *transform = shape->getTransform();
 
         if      (name == "a") { // anchor point
@@ -1752,7 +1882,7 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // trim path
-      else if (type == "tm") {
+      else if (typeName == "tm") {
         auto *trim = shape->getTrim();
 
         if      (name == "s") { // start
@@ -1768,6 +1898,8 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
             return errorMsg(msg1, "readScalarProperty");
         }
         else if (name == "m") { // multiple
+          // 1: Parallel   - All shapes apply the trim at the same time
+          // 2: Sequential - Shapes are considered as a continuous sequence
           trim->multiple = valueToInt(value1);
         }
         else if (name == "d") { // direction
@@ -1777,15 +1909,15 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           unhandledName(name, value1);
       }
       // twist
-      else if (type == "tw") {
+      else if (typeName == "tw") {
         unhandledName(name, value1);
       }
       // zig zag
-      else if (type == "zz") {
+      else if (typeName == "zz") {
         unhandledName(name, value1);
       }
       else {
-        std::cerr << "Unexpected shape type '" << type << "'\n";
+        std::cerr << "Unexpected shape type '" << typeName << "'\n";
       }
     }
   }
@@ -1951,10 +2083,14 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+              std::vector<XYVals> ivalues;
+              if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                keyFrame->setIValues(ivalues);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+              std::vector<XYVals> ovalues;
+              if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
@@ -1969,26 +2105,28 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame->interpolation_))
+              CLottieKeyFrame::Interpolations interpolation;
+              if (! readStrings(msg2, value3, interpolation))
                 return errorMsg(msg2, "readStrings");
+              keyFrame->setInterpolation(interpolation);
             }
             else if (name2 == "h") { // hold
-              keyFrame->hold_ = valueToInt(value3);
+              keyFrame->setHold(valueToInt(value3));
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentIn_ = tangentIn;
+              keyFrame->setTangentIn(tangentIn);
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentOut_ = tangentOut;
+              keyFrame->setTangentOut(tangentOut);
             }
-            else if (name2 == "t") { // ???
-              keyFrame->timeFrame_ = valueToReal(value3);
+            else if (name2 == "t") { // time frame
+              keyFrame->setTimeFrame(valueToReal(value3));
             }
             else
               unhandledName(name2, value3);
@@ -2085,10 +2223,14 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
               if      (name2 == "i") { // input
-                getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+                std::vector<XYVals> ivalues;
+                if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                  keyFrame->setIValues(ivalues);
               }
               else if (name2 == "o") { // output
-                getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+                std::vector<XYVals> ovalues;
+                if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                  keyFrame->setOValues(ovalues);
               }
               else if (name2 == "s") { // start value
                 CPoint2D startValue;
@@ -2103,26 +2245,28 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 keyFrame->endValue.vals.push_back(endValue);
               }
               else if (name2 == "n") { // interpolation key
-                if (! readStrings(msg2, value3, keyFrame->interpolation_))
+                CLottieKeyFrame::Interpolations interpolation;
+                if (! readStrings(msg2, value3, interpolation))
                   return errorMsg(msg2, "readStrings");
+                keyFrame->setInterpolation(interpolation);
               }
               else if (name2 == "h") { // hold
-                keyFrame->hold_ = valueToInt(value3);
+                keyFrame->setHold(valueToInt(value3));
               }
               else if (name2 == "ti") { // Value in Tangent
                 CPoint2D tangentIn;
                 if (! readVector(msg2, value3, tangentIn))
                   return errorMsg(msg2, "readVector");
-                keyFrame->tangentIn_ = tangentIn;
+                keyFrame->setTangentIn(tangentIn);
               }
               else if (name2 == "to") { // Value Out Tangent
                 CPoint2D tangentOut;
                 if (! readVector(msg2, value3, tangentOut))
                   return errorMsg(msg2, "readVector");
-                keyFrame->tangentOut_ = tangentOut;
+                keyFrame->setTangentOut(tangentOut);
               }
-              else if (name2 == "t") { // ???
-                keyFrame->timeFrame_ = valueToReal(value3);
+              else if (name2 == "t") { // time frame
+                keyFrame->setTimeFrame(valueToReal(value3));
               }
               else
                 unhandledName(name2, value3);
@@ -2211,10 +2355,14 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+              std::vector<XYVals> ivalues;
+              if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                keyFrame->setIValues(ivalues);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+              std::vector<XYVals> ovalues;
+              if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
@@ -2229,26 +2377,28 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
               keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame->interpolation_))
+              CLottieKeyFrame::Interpolations interpolation;
+              if (! readStrings(msg2, value3, interpolation))
                 return errorMsg(msg2, "readStrings");
+              keyFrame->setInterpolation(interpolation);
             }
             else if (name2 == "h") { // hold
-              keyFrame->hold_ = valueToInt(value3);
+              keyFrame->setHold(valueToInt(value3));
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentIn_ = tangentIn;
+              keyFrame->setTangentIn(tangentIn);
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentOut_ = tangentOut;
+              keyFrame->setTangentOut(tangentOut);
             }
-            else if (name2 == "t") { // ???
-              keyFrame->timeFrame_ = valueToReal(value3);
+            else if (name2 == "t") { // time frame
+              keyFrame->setTimeFrame(valueToReal(value3));
             }
             else
               unhandledName(name2, value3);
@@ -2335,10 +2485,14 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+              std::vector<XYVals> ivalues;
+              if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                keyFrame->setIValues(ivalues);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+              std::vector<XYVals> ovalues;
+              if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
               CPoint2D startValue;
@@ -2353,26 +2507,28 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
               keyFrame->endValue.vals.push_back(endValue);
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame->interpolation_))
+              CLottieKeyFrame::Interpolations interpolation;
+              if (! readStrings(msg2, value3, interpolation))
                 return errorMsg(msg2, "readStrings");
+              keyFrame->setInterpolation(interpolation);
             }
             else if (name2 == "h") { // hold
-              keyFrame->hold_ = valueToInt(value3);
+              keyFrame->setHold(valueToInt(value3));
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentIn_ = tangentIn;
+              keyFrame->setTangentIn(tangentIn);
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentOut_ = tangentOut;
+              keyFrame->setTangentOut(tangentOut);
             }
-            else if (name2 == "t") { // ???
-              keyFrame->timeFrame_ = valueToReal(value3);
+            else if (name2 == "t") { // time frame
+              keyFrame->setTimeFrame(valueToReal(value3));
             }
             else
               unhandledName(name2, value3);
@@ -2456,10 +2612,14 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+              std::vector<XYVals> ivalues;
+              if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                keyFrame->setIValues(ivalues);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+              std::vector<XYVals> ovalues;
+              if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
 #if 0
@@ -2492,26 +2652,28 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
 #endif
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame->interpolation_))
+              CLottieKeyFrame::Interpolations interpolation;
+              if (! readStrings(msg2, value3, interpolation))
                 return errorMsg(msg2, "readStrings");
+              keyFrame->setInterpolation(interpolation);
             }
             else if (name2 == "h") { // hold
-              keyFrame->hold_ = valueToInt(value3);
+              keyFrame->setHold(valueToInt(value3));
             }
             else if (name2 == "ti") { // Value in Tangent
               CPoint2D tangentIn;
               if (! readVector(msg2, value3, tangentIn))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentIn_ = tangentIn;
+              keyFrame->setTangentIn(tangentIn);
             }
             else if (name2 == "to") { // Value Out Tangent
               CPoint2D tangentOut;
               if (! readVector(msg2, value3, tangentOut))
                 return errorMsg(msg2, "readVector");
-              keyFrame->tangentOut_ = tangentOut;
+              keyFrame->setTangentOut(tangentOut);
             }
-            else if (name2 == "t") { // ???
-              keyFrame->timeFrame_ = valueToReal(value3);
+            else if (name2 == "t") { // time frame
+              keyFrame->setTimeFrame(valueToReal(value3));
             }
             else
               unhandledName(name2, value3);
@@ -2574,6 +2736,8 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
         CJson::Object::Names names2;
         kObj->getNames(names2);
 
+        auto *keyFrame = new BezierKeyFrame;
+
         for (const auto &name2 : names2) {
           auto msg2 = msg1 + "/" + name2;
 
@@ -2593,7 +2757,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                   if (! readPointList(msg1, kValue3, points))
                     return false;
 
-                  bezier.ivalues.push_back(points);
+                  keyFrame->ivalues = points;
                 }
               }
               else {
@@ -2601,7 +2765,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 if (! readPointList(msg1, value3, points))
                   return false;
 
-                bezier.ivalues.push_back(points);
+                keyFrame->ivalues = points;
               }
             }
             else {
@@ -2639,7 +2803,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
               points.push_back(p);
 
-              bezier.ivalues.push_back(points);
+              keyFrame->ivalues = points;
             }
           }
           else if (name2 == "o") { // Out Tangents
@@ -2652,7 +2816,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                   if (! readPointList(msg1, kValue3, points))
                     return false;
 
-                  bezier.ovalues.push_back(points);
+                  keyFrame->ovalues = points;
                 }
               }
               else {
@@ -2660,7 +2824,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 if (! readPointList(msg1, value3, points))
                   return false;
 
-                bezier.ovalues.push_back(points);
+                keyFrame->ovalues = points;
               }
             }
             else {
@@ -2698,7 +2862,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
               points.push_back(p);
 
-              bezier.ovalues.push_back(points);
+              keyFrame->ovalues = points;
             }
           }
           else if (name2 == "v") { // Vertices
@@ -2713,7 +2877,7 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 if (! readPointList(msg1, kValue3, points))
                   return false;
 
-                bezier.vvalues.push_back(points);
+                keyFrame->vvalues = points;
               }
             }
             else {
@@ -2721,23 +2885,26 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
               if (! readPointList(msg1, value3, points))
                 return false;
 
-              bezier.vvalues.push_back(points);
+              keyFrame->vvalues = points;
             }
           }
           else if (name2 == "c") { // close
-            bezier.closed = value3->toBool();
+            keyFrame->closed = value3->toBool();
           }
           else if (name2 == "n") { // interpolation key
-            if (! readStrings(msg2, value3, bezier.interpolation))
+            std::vector<std::string> interpolation;
+            if (! readStrings(msg2, value3, interpolation))
               return errorMsg(msg2, "readStrings");
+
+            keyFrame->interpolation = interpolation;
           }
-          else if (name2 == "t") { // ???
-            bezier.timeFrame = valueToReal(value3);
+          else if (name2 == "t") { // time frame
+            keyFrame->setTimeFrame(valueToReal(value3));
           }
-          else if (name2 == "s") { // ???
+          else if (name2 == "s") { // start points
             auto *kArray3 = value3->cast<CJson::Array>();
 
-            auto *keyFrame = new BezierProperty::KeyFrame;
+            auto *pathData = new BezierPathData;
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
@@ -2755,32 +2922,32 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 kObj4->getNamedValue(name4, value5);
 
                 if      (name4 == "i") {
-                  if (! readPointList(msg1, value5, keyFrame->ipoints))
+                  if (! readPointList(msg1, value5, pathData->ipoints))
                     return false;
                 }
                 else if (name4 == "o") {
-                  if (! readPointList(msg1, value5, keyFrame->opoints))
+                  if (! readPointList(msg1, value5, pathData->opoints))
                     return false;
                 }
                 else if (name4 == "v") {
                   std::vector<CPoint2D> points;
-                  if (! readPointList(msg1, value5, keyFrame->vpoints))
+                  if (! readPointList(msg1, value5, pathData->vpoints))
                     return false;
                 }
                 else if (name4 == "c") {
-                  keyFrame->closed = value5->toBool();
+                  pathData->closed = value5->toBool();
                 }
                 else
                   unhandledName(name4, value5);
               }
             }
 
-            bezier.ikeyFrames.push_back(keyFrame);
+            keyFrame->ipathData = pathData;
           }
-          else if (name2 == "e") { // ???
+          else if (name2 == "e") { // end points
             auto *kArray3 = value3->cast<CJson::Array>();
 
-            auto *keyFrame = new BezierProperty::KeyFrame;
+            auto *pathData = new BezierPathData;
 
             for (const auto &kValue4 : kArray3->values()) {
               if (! kValue4->isObject())
@@ -2798,31 +2965,33 @@ readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
                 kObj4->getNamedValue(name4, value5);
 
                 if      (name4 == "i") {
-                  if (! readPointList(msg1, value5, keyFrame->ipoints))
+                  if (! readPointList(msg1, value5, pathData->ipoints))
                     return false;
                 }
                 else if (name4 == "o") {
-                  if (! readPointList(msg1, value5, keyFrame->opoints))
+                  if (! readPointList(msg1, value5, pathData->opoints))
                     return false;
                 }
                 else if (name4 == "v") {
                   std::vector<CPoint2D> points;
-                  if (! readPointList(msg1, value5, keyFrame->vpoints))
+                  if (! readPointList(msg1, value5, pathData->vpoints))
                     return false;
                 }
                 else if (name4 == "c") {
-                  keyFrame->closed = value5->toBool();
+                  pathData->closed = value5->toBool();
                 }
                 else
                   unhandledName(name4, value5);
               }
             }
 
-            bezier.ekeyFrames.push_back(keyFrame);
+            keyFrame->epathData = pathData;
           }
           else
             unhandledName(name2, value3);
         }
+
+        bezier.keyFrames.push_back(keyFrame);
 
         return true;
       };
@@ -2916,10 +3085,14 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
               std::cout << depthStr(kObj3->hier_depth()) << name2 << "=" << *value3 << "\n";
 
             if      (name2 == "i") { // input
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ivalues_);
+              std::vector<XYVals> ivalues;
+              if (getKeyFrameValues(msg2, name2, value3, ivalues))
+                keyFrame->setIValues(ivalues);
             }
             else if (name2 == "o") { // output
-              getKeyFrameValues(msg2, name2, value3, keyFrame->ovalues_);
+              std::vector<XYVals> ovalues;
+              if (getKeyFrameValues(msg2, name2, value3, ovalues))
+                keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
               std::vector<double> numbers;
@@ -2934,14 +3107,16 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
               keyFrame->endValue = numbers;
             }
             else if (name2 == "n") { // interpolation key
-              if (! readStrings(msg2, value3, keyFrame->interpolation_))
+              CLottieKeyFrame::Interpolations interpolation;
+              if (! readStrings(msg2, value3, interpolation))
                 return errorMsg(msg2, "readStrings");
+              keyFrame->setInterpolation(interpolation);
             }
             else if (name2 == "h") { // hold
-              keyFrame->hold_ = valueToInt(value3);
+              keyFrame->setHold(valueToInt(value3));
             }
-            else if (name2 == "t") { // ???
-              keyFrame->timeFrame_ = valueToReal(value3);
+            else if (name2 == "t") { // time frame
+              keyFrame->setTimeFrame(valueToReal(value3));
             }
             else
               unhandledName(name2, value3);
@@ -3349,7 +3524,8 @@ valueToBool(const CJson::ValueP &value, bool def) const
 
 CMatrixStack2D
 CLottie::
-getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) const
+getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform,
+                   bool autoOrient) const
 {
   CMatrixStack2D m;
 
@@ -3379,7 +3555,20 @@ getTransformMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform) co
   auto m3 = CMatrixStack2D::rotation(CMathGen::DegToRad(r));
   auto m4 = CMatrixStack2D::translation(p.x, p.y);
 
+  if (autoOrient && transform->position.isAnimated()) {
+    auto r1 = transform->position.pathGradient(timeFrame);
+
+    m3 = CMatrixStack2D::rotation(CMathGen::DegToRad(r1));
+  }
+
   return m.append(m4).append(m3).append(m2).append(m1);
+}
+
+CBezierPath
+CLottie::
+getPositionPath(CLottie::Transform *transform) const
+{
+  return transform->position.path();
 }
 
 CMatrixStack2D
@@ -3406,6 +3595,70 @@ getRepeaterMatrix(const TimeFrame &timeFrame, CLottie::Transform *transform, dou
 
   return m.append(m5).append(m4).append(m3).append(m2).append(m1);
 }
+
+//---
+
+bool
+CLottie::
+pathToBezier(const BezierProperty &path, const TimeFrame &timeFrame,
+             CBezierPath &bezierPath) const
+{
+  auto points  = path.tvvalue(timeFrame, CLottie::PointList())->points;
+  auto ipoints = path.tivalue(timeFrame, CLottie::PointList())->points;
+  auto opoints = path.tovalue(timeFrame, CLottie::PointList())->points;
+  auto closed  = path.tclosed(timeFrame).value_or(false);
+
+  //---
+
+  bezierPath.clear();
+
+  auto n = points.size();
+  if (n == 0) return true;
+
+  if (ipoints.size() != n || opoints.size() != n)
+    return false;
+
+  auto p1 = points[0];
+
+  bezierPath.moveTo(p1);
+
+  for (size_t i = 1; i < n; ++i) {
+    auto p2 = points[i - 1] + opoints[i - 1];
+    auto p3 = points[i    ] + ipoints[i    ];
+    auto p4 = points[i    ];
+
+    bezierPath.cubicTo(p2, p3, p4);
+  }
+
+  if (closed) {
+    auto p2 = points[n - 1] + opoints[n - 1];
+    auto p3 = points[0    ] + ipoints[0    ];
+    auto p4 = points[0    ];
+
+    bezierPath.cubicTo(p2, p3, p4);
+
+    bezierPath.setClosed(true);
+  }
+
+  return true;
+}
+
+//---
+
+CLottieAsset *
+CLottie::
+getLayerAsset(const CLottieLayer *layer) const
+{
+  auto *layer1 = const_cast<CLottieLayer *>(layer);
+
+  for (auto *asset : assets_)
+    if (asset->hasLayer(layer1))
+      return asset;
+
+  return nullptr;
+}
+
+//---
 
 CLottieRoot *
 CLottie::
@@ -3467,6 +3720,34 @@ makeEffectValue()
 
 //---
 
+void
+CLottie::
+unhandledName(const std::string &name, const CJson::ValueP &value) const
+{
+  if (! isQuiet())
+    CLottieUtil::unhandledName(name, value);
+}
+
+void
+CLottie::
+todoName(const std::string &msg, const std::string &name, const CJson::ValueP &value) const
+{
+  if (! isQuiet())
+    CLottieUtil::todoName(msg, name, value);
+}
+
+bool
+CLottie::
+warnValueMsg(const std::string &prefix, const std::string &msg, const CJson::ValueP &value) const
+{
+  if (! isQuiet())
+    return CLottieUtil::warnValueMsg(prefix, msg, value);
+  else
+    return false;
+}
+
+//---
+
 CLottieRoot::
 CLottieRoot(CLottie *l) :
  CLottieObject(l, Type::ROOT)
@@ -3501,16 +3782,18 @@ CLottieRoot::
 printLayerHier() const
 {
   for (auto *layer : childLayers()) {
-    std::cerr << layer->name().value_or("") << "\n";
+    std::cerr << "Layer: " << layer->name().value_or("") << "\n";
 
     layer->printLayerHier("  ");
   }
 
   for (auto *asset : assets_) {
-    for (auto *layer : asset->childLayers()) {
-      std::cerr << layer->name().value_or("") << "\n";
+    std::cerr << "Asset: " << asset->name().value_or("") << "\n";
 
-      layer->printLayerHier("  ");
+    for (auto *layer : asset->childLayers()) {
+      std::cerr << "  Layer: " << layer->name().value_or("") << "\n";
+
+      layer->printLayerHier("    ");
     }
   }
 }
@@ -3590,13 +3873,54 @@ getRoot() const
   return nullptr;
 }
 
+bool
+CLottieAsset::
+hasLayer(CLottieLayer *layer) const
+{
+  for (auto *layer1 : layers_)
+    if (layer == layer1)
+      return true;
+
+  return false;
+}
+
 void
 CLottieAsset::
 addLayer(CLottieLayer *layer)
 {
   layers_.push_back(layer);
 
-  lottie_->addLayerId(layer);
+  addLayerId(layer);
+}
+
+void
+CLottieAsset::
+addLayerId(CLottieLayer *layer)
+{
+  auto ind = layer->ind().value();
+
+  auto pl = layerIds_.find(ind);
+
+  if (pl != layerIds_.end()) {
+    if (! lottie_->isQuiet())
+      std::cerr << "Duplicate layer ind " << ind << "\n";
+  }
+
+  layerIds_[ind] = layer;
+}
+
+CLottieLayer *
+CLottieAsset::
+getLayerById(int id) const
+{
+  auto pl1 = layerIds_.find(id);
+
+  if (pl1 != layerIds_.end())
+    return (*pl1).second;
+
+  std::cerr << "Failed to find layer id : " << id << "\n";
+
+  return nullptr;
 }
 
 void
@@ -3668,6 +3992,19 @@ getRoot() const
   return (layer ? layer->getRoot() : nullptr);
 }
 
+CLottieEffect *
+CLottieLayer::
+getEffect()
+{
+  if (! effect_) {
+    effect_ = lottie_->makeEffect();
+
+    effect_->setParent(this);
+  }
+
+  return effect_;
+}
+
 CMatrixStack2D
 CLottieLayer::
 calcTransform(const TimeFrame &timeFrame) const
@@ -3717,8 +4054,74 @@ CLottieShape *
 CLottieLayer::
 getRepeaterShape() const
 {
+  return getShapeOfType(ShapeType::REPEATER);
+}
+
+CLottieShape *
+CLottieLayer::
+getTransformShape() const
+{
+  return getShapeOfType(ShapeType::TRANSFORM);
+}
+
+CLottieShape *
+CLottieLayer::
+getFillShape() const
+{
+  return getShapeOfType(ShapeType::FILL);
+}
+
+CLottieShape *
+CLottieLayer::
+getStrokeShape() const
+{
+  return getShapeOfType(ShapeType::STROKE);
+}
+
+CLottieShape *
+CLottieLayer::
+getGradientFillShape() const
+{
+  return getShapeOfType(ShapeType::GRADIENT_FILL);
+}
+
+CLottieShape *
+CLottieLayer::
+getGradientStrokeShape() const
+{
+  return getShapeOfType(ShapeType::GRADIENT_STROKE);
+}
+
+CLottieShape *
+CLottieLayer::
+getGeomShape() const
+{
   for (auto *shape : shapes()) {
-    if (shape->type() == "rp")
+    if (shape->isGeomShape())
+      return shape;
+  }
+
+  return nullptr;
+}
+
+CLottieShape *
+CLottieLayer::
+getMergeShape() const
+{
+  return getShapeOfType(ShapeType::MERGE, /*hidden*/true);
+}
+
+CLottieShape *
+CLottieLayer::
+getShapeOfType(const ShapeType &shapeType, bool hidden) const
+{
+  for (auto it = shapes().rbegin(); it != shapes().rend(); ++it) {
+    auto *shape = *it;
+
+    if (hidden && shape->isHidden().value_or(false))
+      continue;
+
+    if (shape->shapeType() == shapeType)
       return shape;
   }
 
@@ -3731,7 +4134,15 @@ CLottieLayer *
 CLottieLayer::
 getParentLayer() const
 {
-  return (parentInd_ ? lottie_->getLayerById(*parentInd_) : nullptr);
+  if (! parentInd_)
+    return nullptr;
+
+  auto *asset = lottie_->getLayerAsset(this);
+
+  if (asset)
+    return asset->getLayerById(*parentInd_);
+
+  return lottie_->getLayerById(*parentInd_);
 }
 
 CLottieAsset *
@@ -4059,18 +4470,6 @@ calcHierTransform(const TimeFrame &timeFrame) const
   return m;
 }
 
-CLottieShape *
-CLottieShape::
-getTransformShape() const
-{
-  for (auto *shape : shapes()) {
-    if (shape->type() == "tr")
-      return shape;
-  }
-
-  return nullptr;
-}
-
 //---
 
 CLottieShape::Fill *
@@ -4086,18 +4485,6 @@ calcFill() const
   auto fillShape = pshape->getFillShape();
 
   return (fillShape ? fillShape->fill() : nullptr);
-}
-
-CLottieShape *
-CLottieShape::
-getFillShape() const
-{
-  for (auto *shape : shapes()) {
-    if (shape->type() == "fl")
-      return shape;
-  }
-
-  return nullptr;
 }
 
 //---
@@ -4126,18 +4513,6 @@ calcRepeater() const
   return (player ? player->calcRepeater() : nullptr);
 }
 
-CLottieShape *
-CLottieShape::
-getRepeaterShape() const
-{
-  for (auto *shape : shapes()) {
-    if (shape->type() == "rp")
-      return shape;
-  }
-
-  return nullptr;
-}
-
 //---
 
 CLottieShape::Merge *
@@ -4153,7 +4528,7 @@ CLottieShape *
 CLottieShape::
 calcHierMergeShape() const
 {
-  if (type() == "mm" && ! isHidden().value_or(false))
+  if (shapeType() == ShapeType::MERGE && ! isHidden().value_or(false))
     return const_cast<CLottieShape*>(this);
 
   auto *pshape = getParentShape();
@@ -4169,14 +4544,124 @@ calcHierMergeShape() const
 
 CLottieShape *
 CLottieShape::
+getRepeaterShape() const
+{
+  return getShapeOfType(ShapeType::REPEATER);
+}
+
+CLottieShape *
+CLottieShape::
+getTransformShape() const
+{
+  return getShapeOfType(ShapeType::TRANSFORM);
+}
+
+CLottieShape *
+CLottieShape::
+getFillShape() const
+{
+  return getShapeOfType(ShapeType::FILL);
+}
+
+CLottieShape *
+CLottieShape::
+getStrokeShape() const
+{
+  return getShapeOfType(ShapeType::STROKE);
+}
+
+CLottieShape *
+CLottieShape::
+getGradientFillShape() const
+{
+  return getShapeOfType(ShapeType::GRADIENT_FILL);
+}
+
+CLottieShape *
+CLottieShape::
+getGradientStrokeShape() const
+{
+  return getShapeOfType(ShapeType::GRADIENT_STROKE);
+}
+
+CLottieShape *
+CLottieShape::
 getMergeShape() const
 {
+  return getShapeOfType(ShapeType::MERGE, /*hidden*/true);
+}
+
+CLottieShape *
+CLottieShape::
+getGeomShape() const
+{
   for (auto *shape : shapes()) {
-    if (shape->type() == "mm" && ! shape->isHidden().value_or(false))
+    if (shape->isGeomShape())
       return shape;
   }
 
   return nullptr;
+}
+
+CLottieShape *
+CLottieShape::
+getShapeOfType(const ShapeType &shapeType, bool hidden) const
+{
+  if (this->shapeType() == shapeType)
+    return const_cast<CLottieShape *>(this);
+
+  for (auto it = shapes().rbegin(); it != shapes().rend(); ++it) {
+    auto *shape = *it;
+
+    if (hidden && shape->isHidden().value_or(false))
+      continue;
+
+    if (shape->shapeType() == shapeType)
+      return shape;
+  }
+
+  return nullptr;
+}
+
+bool
+CLottieShape::
+isGeomShape() const
+{
+  auto shapeType = this->shapeType();
+
+  return (shapeType == CLottieShape::ShapeType::PATH ||
+          shapeType == CLottieShape::ShapeType::ELLIPSE ||
+          shapeType == CLottieShape::ShapeType::RECTANGLE ||
+          shapeType == CLottieShape::ShapeType::POLYSTAR);
+}
+
+//---
+
+const char *
+CLottieShape::
+shapeTypeName(const ShapeType &shapeType)
+{
+  switch (shapeType) {
+    case ShapeType::ELLIPSE:         return "Ellipse";
+    case ShapeType::FILL:            return "Fill";
+    case ShapeType::GRADIENT_FILL:   return "Gradient Fill";
+    case ShapeType::GROUP:           return "Group";
+    case ShapeType::GRADIENT_STROKE: return "Gradient Stroke";
+    case ShapeType::MERGE:           return "Merge";
+    case ShapeType::OFFSET_PATH:     return "Offset Path";
+    case ShapeType::PATH:            return "Path";
+    case ShapeType::POLYSTAR:        return "Polystar";
+    case ShapeType::PUCKER_BLOAT:    return "Pucker Bloat";
+    case ShapeType::RECTANGLE:       return "Rectangle";
+    case ShapeType::REPEATER:        return "Repeater";
+    case ShapeType::ROUNDED:         return "Rounded";
+    case ShapeType::STROKE:          return "Stroke";
+    case ShapeType::TRANSFORM:       return "Transform";
+    case ShapeType::TRIM:            return "Trim";
+    case ShapeType::TWIST:           return "Twist";
+    case ShapeType::ZIGZAG:          return "Zig Zag";
+    default:                         return "<none>";
+  }
 }
 
 //---
@@ -4267,6 +4752,18 @@ CLottieObject(CLottie *l, const Type &t) :
 CLottieObject::
 ~CLottieObject()
 {
+}
+
+std::string
+CLottieObject::
+hierName() const
+{
+  auto name = this->name().value_or("<none>");
+
+  if (parent())
+    return parent()->hierName() + "/" + name;
+  else
+    return name;
 }
 
 bool
@@ -4423,9 +4920,29 @@ print(const std::string &prefix) const
   printProperty(prefix1, "roundness", roundness);
 }
 
+//---
+
+CLottieRepeater::
+CLottieRepeater(CLottieShape *shape) :
+ CLottieObject(shape->lottie(), Type::REPEATER), shape_(shape)
+{
+}
+
+CLottieRepeater::
+~CLottieRepeater()
+{
+}
+
+CLottieRoot *
+CLottieRepeater::
+getRoot() const
+{
+  return shape_->getRoot();
+}
+
 void
 CLottieRepeater::
-print(const std::string &prefix) const
+printI(const std::string &prefix, bool /*hier*/) const
 {
   std::cout << prefix << "Repeater\n";
 
@@ -4441,6 +4958,8 @@ print(const std::string &prefix) const
   printProperty(prefix1, "startOpacity", startOpacity);
   printProperty(prefix1, "endOpacity"  , endOpacity);
 }
+
+//---
 
 void
 CLottieShape::Stroke::

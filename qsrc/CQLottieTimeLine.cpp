@@ -81,7 +81,7 @@ paintEvent(QPaintEvent *)
 
   QPen pen(QColor(100, 100, 100));
 
-  pen.setWidth(0);
+  pen.setWidthF(0);
   pen.setCosmetic(true);
 
   painter.setPen(pen);
@@ -93,7 +93,7 @@ paintEvent(QPaintEvent *)
   //---
 
   pen.setColor(Qt::red);
-  pen.setWidth(3);
+  pen.setWidthF(3);
 
   painter.setPen(pen);
 
@@ -137,14 +137,14 @@ paintEvent(QPaintEvent *)
     auto t2 = (keyFrame2 ? keyFrame2->timeFrame().value_or(0) : frameStop);
 
     pen.setColor(Qt::blue);
-    pen.setWidth(2);
+    pen.setWidthF(2);
 
     painter.setPen(pen);
 
     painter.drawLine(QPointF(t1, 0), QPointF(t1, 1));
 
     pen.setColor(Qt::green);
-    pen.setWidth(2);
+    pen.setWidthF(2);
 
     painter.setPen(pen);
 
