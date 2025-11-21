@@ -79,7 +79,10 @@ paintEvent(QPaintEvent *)
 
   painter.setRenderHint(QPainter::Antialiasing);
 
-  painter.fillRect(rect(), lottie_->bgColor());
+  if (isCheckerBoard())
+    drawCheckerboard(&painter, checkerBoardSize());
+  else
+    painter.fillRect(rect(), lottie_->bgColor());
 
   lottie_->draw(&painter, needsUpdate_);
 
@@ -133,5 +136,29 @@ keyPressEvent(QKeyEvent *ke)
   }
   else if (key == Qt::Key_F1) {
     lottie_->nextGeomShape();
+  }
+}
+
+void
+CQLottieCanvas::
+drawCheckerboard(QPainter *painter, int cs) const
+{
+  int w = painter->device()->width ();
+  int h = painter->device()->height();
+
+  int nc = (w + cs - 1)/cs;
+  int nr = (h + cs - 1)/cs;
+
+  for (int r = 0; r < nr; ++r) {
+    int y = r*cs;
+
+    for (int c = 0; c < nc; ++c) {
+      int x = c*cs;
+
+      if ((r + c) & 1)
+        painter->fillRect(QRect(x, y, cs, cs), QColor(200, 200, 200));
+      else
+        painter->fillRect(QRect(x, y, cs, cs), Qt::white);
+    }
   }
 }

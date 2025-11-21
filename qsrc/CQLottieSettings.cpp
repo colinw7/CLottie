@@ -1,7 +1,9 @@
 #include <CQLottieSettings.h>
 #include <CQLottie.h>
+#include <CQLottieCanvas.h>
 
 #include <CQColorEdit.h>
+#include <CQRealSpin.h>
 #include <CQUtil.h>
 
 #include <QLabel>
@@ -35,13 +37,15 @@ CQLottieSettings(CQLottie *lottie) :
     return w;
   };
 
-  equalScale_       = addLabelEdit("Equal Scale"  , new QCheckBox(this));
-  bgFillEdit_       = addLabelEdit("Bg Fill"      , new CQColorEdit(this));
-  showSelect_       = addLabelEdit("Show Select"  , new QCheckBox(this));
-  selectFillEdit_   = addLabelEdit("Select Fill"  , new CQColorEdit(this));
-  selectStrokeEdit_ = addLabelEdit("Select Stroke", new CQColorEdit(this));
-  showBBox_         = addLabelEdit("Show BBox"    , new QCheckBox(this));
-  bboxStrokeEdit_   = addLabelEdit("BBox Stroke"  , new CQColorEdit(this));
+  equalScale_        = addLabelEdit("Equal Scale"  , new QCheckBox(this));
+  bgFillEdit_        = addLabelEdit("Bg Fill"      , new CQColorEdit(this));
+  checkerBoardCheck_ = addLabelEdit("Checker Board", new QCheckBox(this));
+  checkerBoardSize_  = addLabelEdit("Checker Size" , new CQRealSpin(this));
+  showSelect_        = addLabelEdit("Show Select"  , new QCheckBox(this));
+  selectFillEdit_    = addLabelEdit("Select Fill"  , new CQColorEdit(this));
+  selectStrokeEdit_  = addLabelEdit("Select Stroke", new CQColorEdit(this));
+  showBBox_          = addLabelEdit("Show BBox"    , new QCheckBox(this));
+  bboxStrokeEdit_    = addLabelEdit("BBox Stroke"  , new CQColorEdit(this));
 
   auto alignLabels = [&]() {
     QFontMetrics fm(font());
@@ -74,6 +78,10 @@ connectSlots(bool b)
                             this, SLOT(equalScaleSlot(int)));
   CQUtil::connectDisconnect(b, bgFillEdit_, SIGNAL(colorChanged(const QColor &)),
                             this, SLOT(bgFillSlot(const QColor &)));
+  CQUtil::connectDisconnect(b, checkerBoardCheck_, SIGNAL(stateChanged(int)),
+                            this, SLOT(showCheckerBoardSlot(int)));
+  CQUtil::connectDisconnect(b, checkerBoardSize_, SIGNAL(realValueChanged(double)),
+                            this, SLOT(checkerBoardSizeSlot(double)));
   CQUtil::connectDisconnect(b, showSelect_, SIGNAL(stateChanged(int)),
                             this, SLOT(showSelectSlot(int)));
   CQUtil::connectDisconnect(b, selectFillEdit_, SIGNAL(colorChanged(const QColor &)),
@@ -90,15 +98,19 @@ void
 CQLottieSettings::
 updateWidgets()
 {
+  auto *canvas = lottie_->canvas();
+
   connectSlots(false);
 
-  equalScale_      ->setChecked(lottie_->isEqualScale());
-  bgFillEdit_      ->setColor(lottie_->bgColor());
-  showSelect_      ->setChecked(lottie_->isShowSelect());
-  selectFillEdit_  ->setColor(lottie_->selectedBrushColor());
-  selectStrokeEdit_->setColor(lottie_->selectedPenColor());
-  showBBox_        ->setChecked(lottie_->isShowBBox());
-  bboxStrokeEdit_  ->setColor(lottie_->bboxPenColor());
+  equalScale_       ->setChecked(lottie_->isEqualScale());
+  bgFillEdit_       ->setColor(lottie_->bgColor());
+  checkerBoardCheck_->setChecked(canvas->isCheckerBoard());
+  checkerBoardSize_ ->setValue(canvas->checkerBoardSize());
+  showSelect_       ->setChecked(lottie_->isShowSelect());
+  selectFillEdit_   ->setColor(lottie_->selectedBrushColor());
+  selectStrokeEdit_ ->setColor(lottie_->selectedPenColor());
+  showBBox_         ->setChecked(lottie_->isShowBBox());
+  bboxStrokeEdit_   ->setColor(lottie_->bboxPenColor());
 
   connectSlots(true);
 }
@@ -117,6 +129,28 @@ CQLottieSettings::
 bgFillSlot(const QColor &c)
 {
   lottie_->setBgColor(c);
+
+  lottie_->updateAll();
+}
+
+void
+CQLottieSettings::
+showCheckerBoardSlot(int state)
+{
+  auto *canvas = lottie_->canvas();
+
+  canvas->setCheckerBoard(state);
+
+  lottie_->updateAll();
+}
+
+void
+CQLottieSettings::
+checkerBoardSizeSlot(double r)
+{
+  auto *canvas = lottie_->canvas();
+
+  canvas->setCheckerBoardSize(r);
 
   lottie_->updateAll();
 }

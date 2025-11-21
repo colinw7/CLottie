@@ -12,6 +12,7 @@
 #include <CEncode64.h>
 #include <CBezierPath.h>
 #include <CArcToBezier.h>
+#include <CHRTimer.h>
 
 #include <QTabWidget>
 #include <QLabel>
@@ -223,11 +224,11 @@ load(const std::string &filename)
 
   const auto *root = lottie_->root();
 
-  int w = root->width ().value_or(100);
-  int h = root->height().value_or(100);
+  w_ = root->width ().value_or(100);
+  h_ = root->height().value_or(100);
 
   displayRange_.setEqualScale(equalScale_);
-  displayRange_.setWindowRange(0, 0, w, h);
+  displayRange_.setWindowRange(0, 0, w_, h_);
 
   fps_ = std::max(root->frameRate().value_or(1.0), 1.0);
 
@@ -368,6 +369,8 @@ void
 CQLottie::
 draw(QPainter *painter, bool update)
 {
+  CElapsedTimer etime("CQLottie::draw");
+
   const auto *root = lottie_->root();
   if (! root) return;
 
@@ -402,11 +405,11 @@ draw(QPainter *painter, bool update)
     painter->setPen  (selectedPath.pen);
     painter->setBrush(selectedPath.brush);
 
-    painter->drawPath(selectedPath.path);
+    drawPainterPath(painter, selectedPath.path);
 
     setSelectedPenBrush(painter);
 
-    painter->drawPath(selectedPath.path);
+    drawPainterPath(painter, selectedPath.path);
 
     painter->restore();
   }
@@ -440,7 +443,7 @@ CQLottie::
 printAssetLayers() const
 {
   for (const auto &pa : assetLayers_) {
-    std::cerr << "Asset: " << pa.first->id() << ":\n";
+    std::cerr << "Asset: " << pa.first->id().value_or("") << ":\n";
 
     for (auto *layer : pa.second) {
       auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
@@ -455,6 +458,8 @@ void
 CQLottie::
 drawRoot(const DrawState &drawState, const CLottieRoot *root, bool update)
 {
+  CElapsedTimer etime("CQLottie::drawRoot");
+
   if (root->isHidden().value_or(false))
     return;
 
@@ -567,6 +572,11 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
 
       if (qlayer->matteParent()) {
         std::cerr << "Unhandled Matte parent layer '" << hierName(qlayer, drawState) << "'\n";
+
+        auto *matteLayer = lottie_->getLayerById(*qlayer->matteParent());
+
+        if (! matteLayer)
+          std::cerr << "Matte parent layer not found '" << *qlayer->matteParent() << "'\n";
       }
     }
 
@@ -634,7 +644,7 @@ drawChildLayers(const DrawState &drawState, const Layers &childLayers, bool upda
 
 QImage
 CQLottie::
-matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int /*matteMode*/) const
+matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int matteMode) const
 {
   // Matte Mode
   //  0 : Normal
@@ -642,6 +652,12 @@ matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int /*matteMode*
   //  2 : Inverted Alpha
   //  3 : Luminance
   //  4 : Inverted Luminance
+
+  if (matteMode == 0)
+    return layer->image();
+
+  if (matteMode < 0 || matteMode > 4)
+    std::cerr << "Unhandled matte mode: " << matteMode << "\n";
 
   int iw = layer->image().width ();
   int ih = layer->image().height();
@@ -668,9 +684,28 @@ matteLayerImage(CQLottieLayer *layer, CQLottieLayer *clipLayer, int /*matteMode*
     for (int x = 0; x < iw; ++x) {
       auto c = clipImage.pixelColor(x, y);
 
-      if (c.alpha() > 0) {
-        matteImage.setPixelColor(x, y, layerImage.pixelColor(x, y));
+      double a = 0.0;
+
+      if      (matteMode == 1) {
+        a = c.alpha()/255.0;
       }
+      else if (matteMode == 2) {
+        a = 1.0 - c.alpha()/255.0;
+      }
+      else if (matteMode == 3) {
+        a = c.lightness()/255.0;
+      }
+      else if (matteMode == 4) {
+        a = 1.0 - c.lightness()/255.0;
+      }
+
+      auto c1 = layerImage.pixelColor(x, y);
+
+      auto a1 = c1.alpha()/255.0;
+
+      c1.setAlpha(255*a*a1);
+
+      matteImage.setPixelColor(x, y, c1);
     }
   }
 #endif
@@ -696,6 +731,8 @@ void
 CQLottie::
 drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 {
+  CElapsedTimer etime("CQLottie::drawLayer '" + layer->name().value_or("") + "'");
+
   if (layer->isHidden().value_or(false))
     return;
 
@@ -713,13 +750,40 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 
   //---
 
+  auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
   auto drawState1 = drawState;
 
 //drawState1.matrix = getLayerMatrix(drawState, layer);
 
   //---
 
-  auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+  bool hasMask = false;
+
+  auto *mask = layer->mask();
+
+  if (mask) {
+    auto maskMode = mask->mode.value_or("");
+
+    if (maskMode == "a" || maskMode == "s" || maskMode == "i" ||
+        maskMode == "l" || maskMode == "d" || maskMode == "f")
+      hasMask = true;
+
+    if (hasMask) {
+      if (qlayer->isDoubleBuffer()) {
+        std::cerr << "Masked Double Buffer Layer\n";
+        hasMask = false;
+      }
+    }
+  }
+
+  if (hasMask) {
+    drawState1.maskData = new MaskData;
+
+    drawState1.maskData->mask = layer->mask();
+  }
+
+  //---
 
   qlayer->resize(canvas_->width(), canvas_->height());
 
@@ -762,7 +826,7 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
   drawLayerShapes(drawState1, layer);
 
 #if 0
-  drawLayerAssets(drawState.painter, drawState1, layer);
+  drawLayerAssets(drawState1.painter, drawState1, layer);
 #endif
 
   if (! layer->childLayers().empty())
@@ -770,15 +834,22 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 
   //---
 
-  auto bbox = layer->bbox();
+  if (hasMask) {
+    maskLayer(drawState, drawState1.maskData, layer);
 
-  for (auto *layer : layer->childLayers())
-    bbox += layer->bbox();
+    delete drawState1.maskData;
+  }
+  else {
+    auto bbox = layer->bbox();
 
-  for (auto *shape : layer->shapes())
-    bbox += shape->bbox();
+    for (auto *layer : layer->childLayers())
+      bbox += layer->bbox();
 
-  layer->setBBox(bbox);
+    for (auto *shape : layer->shapes())
+      bbox += shape->bbox();
+
+    layer->setBBox(bbox);
+  }
 
   //---
 
@@ -804,35 +875,226 @@ drawLayer(const DrawState &drawState, CLottieLayer *layer, bool update)
 
     drawState.painter->setPen(Qt::red);
 
-    drawState.painter->drawPath(path);
+    drawPainterPath(drawState.painter, path);
 
     drawState.painter->restore();
   }
 
   //---
 
-  if (layer->effect()) {
-    auto type = layer->effect()->type().value_or(0);
+  auto *effect = layer->effect();
+
+  if (effect) {
+    auto type = effect->type().value_or(0);
 
     auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
 
-    if (type == 25) {
-      int     blurRadius = 5;
+    QImage effectImage;
+
+    if      (type == 5) { // custom
+    }
+    else if (type == 21) { // fill
+      OptColor c;
+      OptReal  o;
+
+      for (auto *v : effect->values()) {
+        auto vtype = v->type.value_or(-1);
+        auto vname = v->name.value_or("");
+
+        if      (vtype == 0) {
+          // Horizontal Feather, Vertical Feather, Opacity
+          if (vname == "Opacity" && v->scalar)
+            o = v->scalar->tvalue(drawState.timeFrame);
+        }
+        else if (vtype == 2) {
+          if (v->color)
+            c = v->color->value();
+        }
+        else if (vtype == 7) {
+          // All Masks, Invert
+        }
+        else if (vtype == 10) {
+          // Fill Mask
+        }
+        else
+          std::cerr << "Invalid fill effect value type: " << vtype << "\n";
+      }
+
+      if (c) {
+        if (o)
+          c->setAlpha(o.value());
+
+        effectImage = CQLottieUtil::fillImage(qlayer->image(), *c);
+      }
+      else
+        std::cerr << "No color for fill effect\n";
+    }
+    else if (type == 25) { // drop shadow
+      int     blurRadius  = 5;
       auto    shadowColor = QColor(Qt::black);
       QPointF offset      = QPointF(3, 3);
 
-      auto effectImage =
+      effectImage =
         CQLottieUtil::applyDropShadow(qlayer->image(), blurRadius, shadowColor, offset);
-
-      qlayer->setEffectImage(effectImage);
     }
     else {
-      if (type != 5)
-        std::cerr << "Unhandled effect: " << type << "\n";
-
-      qlayer->setEffectImage(qlayer->image());
+      std::cerr << "Unhandled effect: " << type << "\n";
     }
+
+    if (! effectImage.isNull())
+      qlayer->setEffectImage(effectImage);
+    else
+      qlayer->setEffectImage(qlayer->image());
   }
+}
+
+void
+CQLottie::
+maskLayer(const DrawState &drawState, MaskData *maskData, CLottieLayer *layer)
+{
+  auto maskMode = maskData->mask->mode.value_or("");
+
+  //---
+
+  auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+
+  CBezierPath maskBezierPath;
+  pathToBezier(maskData->mask->path, drawState, maskBezierPath);
+
+  QPainterPath maskPath;
+  toQPath(maskBezierPath, maskPath);
+
+  //---
+
+  QPainterPath epath;
+
+  auto expand = maskData->mask->expand.tvalue(drawState.timeFrame).value_or(0);
+
+  if (expand != 0) {
+    QPainterPathStroker stroker;
+
+    stroker.setCapStyle(Qt::FlatCap);
+    stroker.setJoinStyle(Qt::MiterJoin);
+    stroker.setMiterLimit(0);
+
+    stroker.setDashOffset(0.0);
+    stroker.setDashPattern(Qt::SolidLine);
+
+    stroker.setWidth(std::abs(expand));
+
+    epath = stroker.createStroke(maskPath);
+  }
+
+  //---
+
+  auto opacity = maskData->mask->opacity.tvalue(drawState.timeFrame).value_or(100);
+
+  //---
+
+  bool invert = false;
+
+  if (maskMode == "s")
+    invert = true;
+
+  if (maskData->mask->inverted.value_or(false))
+    invert = ! invert;
+
+  //---
+
+  if (invert) {
+    QPainterPath path1;
+    path1.addRect(QRectF(0, 0, w_, h_));
+
+    maskPath = path1.subtracted(maskPath);
+  }
+
+  //---
+
+  auto pmatrix = drawState.getDisplayMatrix();
+  auto smatrix = getLayerMatrix(drawState, layer);
+
+  auto dmatrix = pmatrix*smatrix.getMatrix();
+
+  //---
+
+  CQLottieLayer::ImagePainter imagePainter;
+  qlayer->createImagePainter(imagePainter);
+
+  auto drawState1 = drawState;
+
+  drawState1.painter = imagePainter.painter;
+
+  drawState1.painter->setTransform(toQTransform(dmatrix));
+
+  // draw mask paths
+  QPainterPath clipPath;
+
+  if (expand < 0) {
+    clipPath = maskPath.subtracted(epath);
+
+    drawState1.painter->setClipPath(clipPath);
+  }
+  else
+    drawState1.painter->setClipPath(maskPath);
+
+  for (const auto &pathData : maskData->paths)
+    drawPathData(drawState1.painter, pathData);
+
+  if (isShowSelect() && layer->isHierSelected()) {
+    drawState1.painter->setTransform(toQTransform(dmatrix));
+
+    if (expand < 0)
+      addSelectedPath(drawState1.painter, clipPath);
+    else
+      addSelectedPath(drawState1.painter, maskPath);
+  }
+
+  delete imagePainter.painter;
+
+  auto image = imagePainter.image;
+
+  if (opacity < 100)
+    image = CQLottieUtil::alphaImage(image, opacity/100.0);
+
+  //---
+
+  QImage eimage;
+
+  if (expand > 0) {
+    CQLottieLayer::ImagePainter eimagePainter;
+    qlayer->createImagePainter(eimagePainter);
+
+    auto drawState2 = drawState;
+
+    drawState2.painter = eimagePainter.painter;
+
+    drawState2.painter->setTransform(toQTransform(dmatrix));
+
+    // draw mask paths
+    drawState2.painter->setClipPath(epath);
+
+    for (const auto &pathData : maskData->paths)
+      drawPathData(drawState2.painter, pathData);
+
+    if (isShowSelect() && layer->isHierSelected()) {
+      drawState2.painter->setTransform(toQTransform(dmatrix));
+
+      addSelectedPath(drawState2.painter, epath);
+    }
+
+    delete eimagePainter.painter;
+
+    eimage = eimagePainter.image;
+  }
+
+  //---
+
+  drawState.painter->drawImage(0, 0, image);
+
+  if (expand > 0)
+    drawState.painter->drawImage(0, 0, eimage);
+
+  qlayer->setImage(image); // TODO: eimage
 }
 
 void
@@ -1022,10 +1284,10 @@ drawMergeShapes(DrawState &drawState, const CLottieShape *mergeShape)
 
       lpath.setFillRule(Qt::WindingFill);
 
-      drawState.painter->drawPath(lpath);
+      drawPainterPath(drawState.painter, lpath);
     }
     else
-      drawState.painter->drawPath(path);
+      drawPainterPath(drawState.painter, path);
 
     //---
 
@@ -1066,35 +1328,27 @@ drawTrimShapes(DrawState &drawState, const CLottieShape *trimShape)
     QPainterPath ppath;
     toQPath(bezierPath1, ppath);
 
-    drawState.painter->setPen  (pathData.pen);
-    drawState.painter->setBrush(pathData.brush);
+    if (drawState.maskData) {
+      PathData pathData1 = pathData;
+      pathData1.path = ppath;
 
-    drawState.painter->setTransform(pathData.transform);
-
-    if (pathData.stroker) {
-      auto lpath = pathData.stroker->createStroke(ppath);
-
-      lpath.setFillRule(Qt::WindingFill);
-
-      drawState.painter->drawPath(lpath);
-
-      if (isShowSelect() && trimShape->isHierSelected())
-        addSelectedPath(drawState.painter, lpath);
+      drawState.maskData->paths.push_back(pathData1);
     }
     else {
-      drawState.painter->drawPath(ppath);
+      auto ppath1 = drawPathDataPath(drawState.painter, pathData, ppath);
 
       if (isShowSelect() && trimShape->isHierSelected())
-        addSelectedPath(drawState.painter, ppath);
+       addSelectedPath(drawState.painter, ppath1);
+
+      auto pbbox1 = bezierPath1.bbox();
+      auto bbox1  = CQLottieUtil::transformBBox(pathData.smatrix, pbbox1);
+
+      bbox += bbox1;
     }
-
-    auto pbbox1 = bezierPath1.bbox();
-    auto bbox1  = CQLottieUtil::transformBBox(pathData.smatrix, pbbox1);
-
-    bbox += bbox1;
   }
 
-  const_cast<CLottieShape *>(trimShape)->setBBox(bbox);
+  if (bbox.isSet())
+    const_cast<CLottieShape *>(trimShape)->setBBox(bbox);
 
   //---
 
@@ -1120,6 +1374,8 @@ void
 CQLottie::
 drawAsset(const DrawState &drawState, CLottieAsset *asset)
 {
+  CElapsedTimer etime("CQLottie::drawAsset '" + asset->id().value_or("") + "'");
+
   if (asset->childLayers().empty())
     return;
 
@@ -1197,6 +1453,13 @@ drawPrecompLayer(const DrawState &drawState, CLottieLayer *layer)
   if (layer->frameIn())
     drawState1.timeFrame.delta -= layer->frameIn().value();
 
+  if (layer->precomp() && layer->precomp()->timeRemap.isSet()) {
+    auto t = layer->precomp()->timeRemap.tvalue(drawState.timeFrame).value();
+
+    drawState1.timeFrame.secs  = t;
+    drawState1.timeFrame.frame = t*fps_;
+  }
+
 #if 0
   const auto &parentDisplayRange = drawState1.displayRanges.back();
 
@@ -1240,7 +1503,6 @@ drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
   //---
 
   auto pmatrix = drawState.getDisplayMatrix();
-//auto smatrix = drawState.matrix.getMatrix();
   auto smatrix = getLayerMatrix(drawState, layer);
 
   auto dmatrix = pmatrix*smatrix.getMatrix();
@@ -1251,7 +1513,7 @@ drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
   auto p2 = CPoint2D(w - 1, h - 1);
 
   auto bbox  = CBBox2D(p1, p2);
-//auto bbox1 = CQLottieUtil::transformBBox(smatrix, bbox);
+  auto bbox1 = CQLottieUtil::transformBBox(smatrix, bbox);
 
   //---
 
@@ -1264,9 +1526,9 @@ drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
   drawState.painter->setBrush(CQLottieUtil::toQColor(color));
 
   // add mask
-  if (layer->mask()) {
-    auto *mask = layer->mask();
+  auto *mask = layer->mask();
 
+  if (mask) {
     CBezierPath bezierPath;
     pathToBezier(mask->path, drawState, bezierPath);
 
@@ -1285,7 +1547,7 @@ drawSolidLayer(const DrawState &drawState, const CLottieLayer *layer)
 
   //---
 
-  const_cast<CLottieLayer *>(layer)->setBBox(bbox);
+  const_cast<CLottieLayer *>(layer)->setBBox(bbox1);
 }
 
 void
@@ -1299,7 +1561,7 @@ drawImageLayer(const DrawState &drawState, const CLottieLayer *layer)
   //---
 
   // get image from asset
-  auto image = getAssetImage(asset);
+  auto image = getAssetImage(asset, /*create*/true);
   if (image.isNull()) return;
 
   int w = asset->width ().value_or(100);
@@ -1395,12 +1657,21 @@ getLayerAsset(const CLottieLayer *layer) const
 
 QImage
 CQLottie::
-getAssetImage(CLottieAsset *asset) const
+getAssetImage(CLottieAsset *asset, bool create) const
 {
   // get image from asset
-  auto pi = assetImage_.find(asset->id());
+  assert(asset->id());
+
+  auto assetId = asset->id().value();
+
+  auto pi = assetImage_.find(assetId);
 
   if (pi == assetImage_.end()) {
+    if (! create)
+      return QImage();
+
+    //---
+
     auto embedded = asset->embedded().value_or(false);
     auto dir      = asset->dir().value_or(".");
     auto path     = asset->path().value_or("");
@@ -1437,18 +1708,30 @@ getAssetImage(CLottieAsset *asset) const
       }
     }
 
+    //---
+
+    ImageData imageData;
+
+    imageData.image  = image;
+    imageData.width  = image.width();
+    imageData.height = image.height();
+
     auto *th = const_cast<CQLottie *>(this);
 
-    pi = th->assetImage_.insert(pi, AssetImage::value_type(asset->id(), image));
+    pi = th->assetImage_.insert(pi, AssetImage::value_type(assetId, imageData));
   }
 
-  return (*pi).second;
+  const auto &imageData = (*pi).second;
+
+  return imageData.image;
 }
 
 void
 CQLottie::
 drawShape(DrawState &drawState, CLottieShape *shape)
 {
+  CElapsedTimer etime("CQLottie::drawShape '" + shape->name().value_or("") + "'");
+
   if (shape->isHidden().value_or(false))
     return;
 
@@ -1467,12 +1750,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
   }
   else if (shapeType == CLottieShape::ShapeType::FILL) { // fill
     drawState.fill.shape = shape;
-
-#if 0
-    drawState.fill.color   = getHierFillColor  (drawState, shape, drawState.fill.color);
-    drawState.fill.opacity = getHierFillOpacity(drawState, shape, drawState.fill.opacity);
-    drawState.fill.rule    = shape->fill()->fillRule.value_or(1);
-#endif
   }
   else if (shapeType == CLottieShape::ShapeType::GRADIENT_FILL) { // gradient fill
     drawState.fillGradient.shape = shape;
@@ -1481,8 +1758,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
   }
   else if (shapeType == CLottieShape::ShapeType::GRADIENT_STROKE) { // gradient stroke
     drawState.strokeGradient.shape = shape;
-
-//  gradientStrokeShape(drawState, shape);
   }
   else if (shapeType == CLottieShape::ShapeType::GROUP) { // group
   }
@@ -1497,18 +1772,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
   }
   else if (shapeType == CLottieShape::ShapeType::STROKE) { // stroke
     drawState.stroke.shape = shape;
-
-#if 0
-    drawState.stroke.color   = getHierStrokeColor  (drawState, shape, drawState.stroke.color);
-    drawState.stroke.opacity = getHierStrokeOpacity(drawState, shape, drawState.stroke.opacity);
-
-    if (shape->stroke()) {
-      drawState.stroke.width      = shape->stroke()->width.tvalue(drawState.timeFrame);
-      drawState.stroke.lineCap    = shape->stroke()->lineCap;
-      drawState.stroke.lineJoin   = shape->stroke()->lineJoin;
-      drawState.stroke.miterLimit = shape->stroke()->miterLimit;
-    }
-#endif
   }
   else if (shapeType == CLottieShape::ShapeType::TRANSFORM) { // transform shape
 #if 0
@@ -1521,13 +1784,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
     assert(shape->trim());
 
     drawState.trim.shape = shape;
-
-#if 0
-    trim.start  = shape->trim()->start .tvalue(drawState.timeFrame,   0.0).value()/100.0;
-    trim.end    = shape->trim()->end   .tvalue(drawState.timeFrame, 100.0).value()/100.0;
-    trim.offset = shape->trim()->offset.tvalue(drawState.timeFrame,   0.0).value()/360.0;
-    trim.mult   = shape->trim()->multiple.value_or(1);
-#endif
   }
   else if (shapeType == CLottieShape::ShapeType::MERGE) { // merge path
     assert(shape->merge());
@@ -1640,24 +1896,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
   }
 }
 
-#if 0
-void
-CQLottie::
-gradientFillShape(DrawState &drawState, const CLottieShape *shape)
-{
-  //unhandledShape("gradient fill");
-
-  auto *gradientFill = shape->gradientFill();
-  if (! gradientFill) return;
-
-  drawState.fillGradient.shape = shape;
-
-#if 0
-  drawState.fillGradient.gradient = calcGradientFill(drawState.timeFrame, gradientFill);
-#endif
-}
-#endif
-
 QGradient
 CQLottie::
 calcGradientFill(const TimeFrame &timeFrame, CLottieShape::GradientFill *gradientFill) const
@@ -1665,14 +1903,33 @@ calcGradientFill(const TimeFrame &timeFrame, CLottieShape::GradientFill *gradien
   auto startPoint = gradientFill->startPoint.tvalue(timeFrame, CPoint2D(0, 0)).value();
   auto endPoint   = gradientFill->endPoint  .tvalue(timeFrame, CPoint2D(0, 0)).value();
 
-//std::cerr << startPoint << " " << endPoint << "\n";
+  //---
 
   auto colors = gradientFill->colors.tvalue(timeFrame);
 
-//for (const auto &c : colors->vals)
-//  std::cerr << c << "\n";
+  auto nc = int(colors->vals.size());
+  auto ns = gradientFill->stopCount.value_or(-1);
 
-  auto nc = colors->vals.size();
+  if (ns > 0)
+   ns = std::min(ns, nc/4);
+
+  struct Stop {
+    double pos { 0.0 };
+    CRGBA  color;
+  };
+
+  std::vector<Stop> stops;
+
+  for (int i = 0; i < ns; ++i) {
+    Stop stop;
+
+    stop.pos   = colors->vals[4*i];
+    stop.color = CRGBA(colors->vals[4*i + 1], colors->vals[4*i + 2], colors->vals[4*i + 3]);
+
+    stops.push_back(stop);
+  }
+
+  //---
 
   auto type = gradientFill->type.value_or(1);
 
@@ -1684,11 +1941,8 @@ calcGradientFill(const TimeFrame &timeFrame, CLottieShape::GradientFill *gradien
     lgradient.setStart(startPoint.x, startPoint.y);
     lgradient.setFinalStop(endPoint.x, endPoint.y);
 
-    for (size_t i = 0; i < nc/4; ++i) {
-      auto c = CRGBA(colors->vals[4*i + 1], colors->vals[4*i + 2], colors->vals[4*i + 3]);
-
-      lgradient.setColorAt(colors->vals[4*i], CQLottieUtil::toQColor(c));
-    }
+    for (const auto &stop : stops)
+      lgradient.setColorAt(stop.pos, CQLottieUtil::toQColor(stop.color));
 
     gradient = lgradient;
   }
@@ -1712,11 +1966,8 @@ calcGradientFill(const TimeFrame &timeFrame, CLottieShape::GradientFill *gradien
 
     rgradient.setFocalRadius(0.0);
 
-    for (size_t i = 0; i < nc/4; ++i) {
-      auto c = CRGBA(colors->vals[4*i + 1], colors->vals[4*i + 2], colors->vals[4*i + 3]);
-
-      rgradient.setColorAt(colors->vals[4*i], CQLottieUtil::toQColor(c));
-    }
+    for (const auto &stop : stops)
+      rgradient.setColorAt(stop.pos, CQLottieUtil::toQColor(stop.color));
 
     gradient = rgradient;
   }
@@ -1726,57 +1977,88 @@ calcGradientFill(const TimeFrame &timeFrame, CLottieShape::GradientFill *gradien
   return gradient;
 }
 
-#if 0
-void
-CQLottie::
-gradientStrokeShape(DrawState &drawState, const CLottieShape *shape)
-{
-  //unhandledShape("gradient stroke");
-
-  auto *gradientStroke = shape->gradientStroke();
-  if (! gradientStroke) return;
-
-  drawState.strokeGradient.shape = shape;
-
-#if 0
-  drawState.strokeGradient.gradient = calcGradientStroke(drawState.timeFrame, gradientStroke);
-
-  drawState.strokeGradient.opacity = gradientStroke->opacity.tvalue(drawState.timeFrame, 100.0);
-
-  drawState.strokeGradient.width      = gradientStroke->width.tvalue(drawState.timeFrame);
-  drawState.strokeGradient.lineCap    = gradientStroke->lineCap;
-  drawState.strokeGradient.lineJoin   = gradientStroke->lineJoin;
-  drawState.strokeGradient.miterLimit = gradientStroke->miterLimit;
-#endif
-}
-#endif
-
-QLinearGradient
+QGradient
 CQLottie::
 calcGradientStroke(const TimeFrame &timeFrame, CLottieShape::GradientStroke *gradientStroke) const
 {
   auto startPoint = gradientStroke->startPoint.tvalue(timeFrame, CPoint2D(0, 0)).value();
   auto endPoint   = gradientStroke->endPoint  .tvalue(timeFrame, CPoint2D(0, 0)).value();
 
-//std::cerr << startPoint << " " << endPoint << "\n";
+  //---
 
   auto colors = gradientStroke->colors.tvalue(timeFrame);
 
-//for (const auto &c : colors->vals)
-//  std::cerr << c << "\n";
+  auto nc = int(colors->vals.size());
+  auto ns = gradientStroke->stopCount.value_or(-1);
 
-  auto nc = colors->vals.size();
+  if (ns > 0)
+   ns = std::min(ns, nc/4);
 
-  QLinearGradient gradient;
+  struct Stop {
+    double pos { 0.0 };
+    CRGBA  color;
+  };
 
-  gradient.setStart(startPoint.x, startPoint.y);
-  gradient.setFinalStop(endPoint.x, endPoint.y);
+  std::vector<Stop> stops;
 
-  for (size_t i = 0; i < nc/4; ++i) {
-    auto c = CRGBA(colors->vals[4*i + 1], colors->vals[4*i + 2], colors->vals[4*i + 3]);
+  for (int i = 0; i < ns; ++i) {
+    Stop stop;
 
-    gradient.setColorAt(colors->vals[4*i], CQLottieUtil::toQColor(c));
+    stop.pos   = colors->vals[4*i];
+    stop.color = CRGBA(colors->vals[4*i + 1], colors->vals[4*i + 2], colors->vals[4*i + 3]);
+
+    stops.push_back(stop);
   }
+
+  //---
+
+  auto type = gradientStroke->type.value_or(1);
+
+  QGradient gradient;
+
+  if      (type == 1) {
+    QLinearGradient lgradient;
+
+    lgradient.setStart(startPoint.x, startPoint.y);
+    lgradient.setFinalStop(endPoint.x, endPoint.y);
+
+    for (const auto &stop : stops)
+      lgradient.setColorAt(stop.pos, CQLottieUtil::toQColor(stop.color));
+
+    gradient = lgradient;
+  }
+  else if (type == 2) {
+    QRadialGradient rgradient;
+
+    rgradient.setCenter(startPoint.x, startPoint.y);
+
+    auto v = CVector2D(startPoint, endPoint);
+    auto r = v.length();
+
+    rgradient.setCenterRadius(r);
+
+#if 0
+    auto highlightLength = gradientStroke->highlightLength.tvalue(timeFrame, 0).value()/100.0;
+    auto highlightAngle  = gradientStroke->highlightAngle .tvalue(timeFrame, 0).value();
+#else
+    double highlightLength = 0.0;
+    double highlightAngle  = 0.0;
+#endif
+
+    auto angle = CMathGen::DegToRad(v.angle() + highlightAngle);
+
+    rgradient.setFocalPoint(startPoint.x + std::cos(angle)*highlightLength*r,
+                            startPoint.y + std::sin(angle)*highlightLength*r);
+
+    rgradient.setFocalRadius(0.0);
+
+    for (const auto &stop : stops)
+      rgradient.setColorAt(stop.pos, CQLottieUtil::toQColor(stop.color));
+
+    gradient = rgradient;
+  }
+  else
+    std::cerr << "Unknown gradient type : " << type << "\n";
 
   return gradient;
 }
@@ -1911,7 +2193,7 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
 
   //---
 
-  if (drawState.trim.shape) {
+  if      (drawState.trim.shape) {
     auto *trimShape = getDrawTrimShape(drawState);
     assert(trimShape == drawState.trim.shape);
 
@@ -1920,16 +2202,22 @@ drawBezierPath(DrawState &drawState, const CLottieShape *shape, CBezierPath &bez
 
     drawState.trim.paths.push_back(pathData);
   }
+  else if (drawState.maskData) {
+    PathData pathData;
+    setPathData(drawState, path, smatrix, pathData);
+
+    drawState.maskData->paths.push_back(pathData);
+  }
   else {
     if (drawState.stroker) {
       auto lpath = drawState.stroker->createStroke(path);
 
       lpath.setFillRule(Qt::WindingFill);
 
-      drawState.painter->drawPath(lpath);
+      drawPainterPath(drawState.painter, lpath);
     }
     else
-      drawState.painter->drawPath(path);
+      drawPainterPath(drawState.painter, path);
 
     //---
 
@@ -1987,40 +2275,11 @@ CLottieShape *
 CQLottie::
 getDrawMergeShape(const DrawState &drawState) const
 {
-#if 0
-  CLottieShape *mergeShape = nullptr;
-
-  for (const auto &objData : drawState.objects) {
-    auto *obj = objData.object;
-
-    auto objectType = obj->objectType();
-
-    if      (objectType == CLottieObject::Type::LAYER) {
-      auto *layer = dynamic_cast<CLottieLayer *>(obj);
-
-      auto *mergeShape1 = layer->getMergeShape();
-
-      if (mergeShape1 && mergeShape1->merge()) {
-        mergeShape = mergeShape1;
-        break;
-      }
-    }
-    else if (objectType == CLottieObject::Type::SHAPE) {
-      auto *shape = dynamic_cast<CLottieShape *>(obj);
-
-      auto *mergeShape1 = shape->getMergeShape();
-
-      if (mergeShape1 && mergeShape1->merge()) {
-        mergeShape = mergeShape1;
-        break;
-      }
-    }
-  }
-
-  return mergeShape;
-#else
   for (const auto &objData : drawState.objects) {
     for (auto *obj : objData.siblings) {
+      if (obj->isHidden().value_or(false))
+        continue;
+
       auto objectType = obj->objectType();
 
       if (objectType == CLottieObject::Type::SHAPE) {
@@ -2033,7 +2292,6 @@ getDrawMergeShape(const DrawState &drawState) const
   }
 
   return nullptr;
-#endif
 }
 
 CLottieShape *
@@ -2042,6 +2300,9 @@ getDrawTrimShape(const DrawState &drawState) const
 {
   for (const auto &objData : drawState.objects) {
     for (auto *obj : objData.siblings) {
+      if (obj->isHidden().value_or(false))
+        continue;
+
       auto objectType = obj->objectType();
 
       if (objectType == CLottieObject::Type::SHAPE) {
@@ -2055,6 +2316,62 @@ getDrawTrimShape(const DrawState &drawState) const
 
   return nullptr;
 }
+
+//---
+
+QPainterPath
+CQLottie::
+drawPathData(QPainter *painter, const PathData &pathData) const
+{
+  CBezierPath bezierPath;
+  fromQPath(pathData.path, bezierPath);
+
+  QPainterPath ppath;
+  toQPath(bezierPath, ppath);
+
+  return drawPathDataPath(painter, pathData, ppath);
+}
+
+QPainterPath
+CQLottie::
+drawPathDataPath(QPainter *painter, const PathData &pathData, const QPainterPath &ppath) const
+{
+  painter->setPen  (pathData.pen);
+  painter->setBrush(pathData.brush);
+
+  painter->setTransform(pathData.transform);
+
+  if (pathData.stroker) {
+    auto lpath = pathData.stroker->createStroke(ppath);
+
+    lpath.setFillRule(Qt::WindingFill);
+
+    drawPainterPath(painter, lpath);
+
+    return lpath;
+  }
+  else {
+    drawPainterPath(painter, ppath);
+
+    return ppath;
+  }
+}
+
+void
+CQLottie::
+drawPainterPath(QPainter *painter, const QPainterPath &path) const
+{
+#if 0
+  if (painter->pen().style() == Qt::CustomDashLine) {
+    auto pattern = pen.dashPattern();
+    auto offset  = pen.dashOffset();
+  }
+#endif
+
+  painter->drawPath(path);
+}
+
+//---
 
 void
 CQLottie::
@@ -2119,40 +2436,7 @@ void
 CQLottie::
 drawPolystar(DrawState &drawState, const CLottieShape *shape)
 {
-#if 0
-  auto *polyStar = shape->polyStar();
-  if (! polyStar) return;
-
-  auto positionxy = polyStar->position.tvalue(drawState.timeFrame, CLottie::XYVals()).value();
-  auto position   = positionxy.toPoint(CPoint2D(0, 0));
-
-  auto type = polyStar->type.value_or(1);
-
-  if (type != 1 && type != 2)
-    warnOnce(__LINE__, "unhandled polystar type: " + std::to_string(type));
-
-  auto numPoints = int(polyStar->points.tvalue(drawState.timeFrame, 0).value_or(0));
-
-  auto innerRadius    = polyStar->innerRadius   .tvalue(drawState.timeFrame, 0).value_or(0);
-  auto innerRoundness = polyStar->outerRoundness.tvalue(drawState.timeFrame, 0).value_or(0);
-  auto outerRadius    = polyStar->outerRadius   .tvalue(drawState.timeFrame, 0).value_or(0);
-  auto outerRoundness = polyStar->outerRoundness.tvalue(drawState.timeFrame, 0).value_or(0);
-
-  auto rotation = CMathGen::DegToRad(polyStar->rotation.tvalue(drawState.timeFrame, 0).value_or(0));
-
-  CBezierPath bezierPath;
-
-  if (type == 1)
-    bezierPath.addPolyStar(position, numPoints, innerRadius, outerRadius,
-                           innerRoundness/100.0, outerRoundness/100.0, rotation);
-  else
-    bezierPath.addPolygon(position, numPoints, outerRadius,
-                          outerRoundness/100.0, rotation);
-#else
   auto bezierPath = getPolyStarPath(drawState.timeFrame, shape);
-#endif
-
-  //---
 
   drawBezierPath(drawState, shape, bezierPath);
 }
@@ -2199,32 +2483,7 @@ void
 CQLottie::
 drawRectangle(DrawState &drawState, const CLottieShape *shape)
 {
-#if 0
-  auto positionxy = shape->pos().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
-  auto position   = positionxy.toPoint(CPoint2D(0, 0));
-
-  auto sizexy = shape->size().tvalue(drawState.timeFrame, CLottie::XYVals()).value();
-  auto size   = sizexy.toPoint(CPoint2D(0, 0));
-
-  auto p1 = CPoint2D(position.x - size.x/2.0, position.y - size.y/2.0);
-  auto p2 = CPoint2D(position.x + size.x/2.0, position.y + size.y/2.0);
-
-  auto bbox = CBBox2D(p1, p2);
-
-  //---
-
-  CBezierPath bezierPath;
-
-  if (shape->rectangle()) {
-    auto r = shape->rectangle()->roundness.tvalue(drawState.timeFrame, 0.0).value();
-
-    bezierPath.addRoundedRect(bbox, r, r);
-  }
-  else
-    bezierPath.addRect(bbox);
-#else
   auto bezierPath = getRectanglePath(drawState.timeFrame, shape);
-#endif
 
   drawBezierPath(drawState, shape, bezierPath);
 }
@@ -2270,17 +2529,6 @@ setPenBrush(DrawState &drawState, const CLottieShape *shape)
   drawState.painter->setPen  (penBrush.pen);
 
   drawState.stroker = penBrush.stroker;
-
-#if 0
-  if (penBrush.strokeWidth)
-    drawState.stroke.width = penBrush.strokeWidth;
-  if (penBrush.strokeLineCap)
-    drawState.stroke.lineCap = penBrush.strokeLineCap;
-  if (penBrush.strokeLineJoin)
-    drawState.stroke.lineJoin = penBrush.strokeLineJoin;
-  if (penBrush.strokeMiterLimit)
-    drawState.stroke.miterLimit = penBrush.strokeMiterLimit;
-#endif
 }
 
 void
@@ -2326,25 +2574,6 @@ calcPenBrush(const DrawState &drawState, const CLottieShape *shape, PenBrush &pe
     auto *gradientStroke = strokeShape->gradientStroke();
     assert(gradientStroke);
 
-#if 0
-    if (drawState.strokeGradient.lineCap)
-      penBrush.stroker->setCapStyle(
-        CQLottieUtil::toLineCap(drawState.strokeGradient.lineCap.value()));
-    if (drawState.strokeGradient.lineJoin)
-      penBrush.stroker->setJoinStyle(
-        CQLottieUtil::toLineJoin(drawState.strokeGradient.lineJoin.value()));
-
-    if (drawState.strokeGradient.miterLimit)
-      penBrush.stroker->setMiterLimit(drawState.strokeGradient.miterLimit.value());
-
-    penBrush.stroker->setDashOffset (0.0);
-    penBrush.stroker->setDashPattern(Qt::SolidLine);
-
-    if (drawState.strokeGradient.width)
-      penBrush.stroker->setWidth(drawState.strokeGradient.width.value());
-
-    penBrush.brush = QBrush(drawState.strokeGradient.gradient);
-#else
     auto gradient = calcGradientStroke(drawState.timeFrame, gradientStroke);
 //  auto opacity  = gradientStroke->opacity.tvalue(drawState.timeFrame, 100.0);
 
@@ -2370,7 +2599,6 @@ calcPenBrush(const DrawState &drawState, const CLottieShape *shape, PenBrush &pe
       penBrush.stroker->setWidth(width.value());
 
     penBrush.brush = QBrush(gradient);
-#endif
 
     penBrush.pen.setStyle(Qt::NoPen);
   }
@@ -2400,6 +2628,22 @@ calcPenBrush(const DrawState &drawState, const CLottieShape *shape, PenBrush &pe
       penBrush.strokeLineCap    = stroke->lineCap;
       penBrush.strokeLineJoin   = stroke->lineJoin;
       penBrush.strokeMiterLimit = stroke->miterLimit;
+
+      if (! stroke->dash.dash.empty()) {
+        std::vector<double> lengths;
+        double              offset { 0.0 };
+
+        if (! stroke->dash.offset.empty())
+          offset = stroke->dash.offset[0].tvalue(drawState.timeFrame).value_or(0.0);
+
+        if (! stroke->dash.dash.empty())
+          lengths.push_back(stroke->dash.dash[0].tvalue(drawState.timeFrame).value_or(0.0));
+
+        if (! stroke->dash.gap.empty())
+          lengths.push_back(stroke->dash.gap[0].tvalue(drawState.timeFrame).value_or(0.0));
+
+        penBrush.strokeLineDash = CLineDash(lengths, offset);
+      }
     }
 
     if (penBrush.strokeWidth)
@@ -2410,6 +2654,9 @@ calcPenBrush(const DrawState &drawState, const CLottieShape *shape, PenBrush &pe
 
     if (penBrush.strokeLineJoin)
       penBrush.pen.setJoinStyle(CQLottieUtil::toLineJoin(penBrush.strokeLineJoin.value()));
+
+    if (strokeShape && ! strokeShape->stroke()->dash.dash.empty())
+      CQLottieUtil::penSetLineDash(penBrush.pen, penBrush.strokeLineDash);
 
     if (penBrush.strokeMiterLimit)
       penBrush.pen.setMiterLimit(penBrush.strokeMiterLimit.value());
@@ -2690,40 +2937,13 @@ getHierFillColor(const DrawState &drawState, const CLottieShape *shape, const Op
   c = getFillColor(drawState.timeFrame, shape, def);
   if (c) return c;
 
-#if 0
-  auto *pshape = shape->getParentShape();
-
-  if (pshape)
-    c = getHierFillColor(drawState, pshape);
-#else
-#if 0
-  for (const auto &objData : drawState.objects) {
-    auto *obj = objData.object;
-
-    auto objectType = obj->objectType();
-
-    if      (objectType == CLottieObject::Type::LAYER) {
-      auto *layer1 = dynamic_cast<CLottieLayer *>(obj);
-
-      auto *fillShape = layer1->getFillShape();
-
-      if (fillShape) {
-        c = getFillColor(drawState.timeFrame, fillShape, def);
-        if (c) return c;
-      }
-    }
-    else if (objectType == CLottieObject::Type::SHAPE) {
-      auto *shape1 = dynamic_cast<CLottieShape *>(obj);
-
-      c = getFillColor(drawState.timeFrame, shape1, def);
-      if (c) return c;
-    }
-  }
-#else
   for (const auto &objData : drawState.objects) {
     bool strokeFill = false;
 
     for (auto *obj : objData.siblings) {
+      if (obj->isHidden().value_or(false))
+        continue;
+
       auto objectType = obj->objectType();
 
       if (objectType == CLottieObject::Type::SHAPE) {
@@ -2743,8 +2963,6 @@ getHierFillColor(const DrawState &drawState, const CLottieShape *shape, const Op
     if (strokeFill)
       break;
   }
-#endif
-#endif
 
   return (c ? c : def);
 }
@@ -2753,40 +2971,11 @@ CLottieShape *
 CQLottie::
 getDrawFillShape(const DrawState &drawState) const
 {
-#if 0
-  CLottieShape *fillShape = nullptr;
-
-  for (const auto &objData : drawState.objects) {
-    auto *obj = objData.object;
-
-    auto objectType = obj->objectType();
-
-    if      (objectType == CLottieObject::Type::LAYER) {
-      auto *layer = dynamic_cast<CLottieLayer *>(obj);
-
-      auto *fillShape1 = layer->getFillShape();
-
-      if (fillShape1 && fillShape1->fill()) {
-        fillShape = fillShape1;
-        break;
-      }
-    }
-    else if (objectType == CLottieObject::Type::SHAPE) {
-      auto *shape1 = dynamic_cast<CLottieShape *>(obj);
-
-      auto *fillShape1 = shape1->getFillShape();
-
-      if (fillShape1 && fillShape1->fill()) {
-        fillShape = fillShape1;
-        break;
-      }
-    }
-  }
-
-  return fillShape;
-#else
   for (const auto &objData : drawState.objects) {
     for (auto *obj : objData.siblings) {
+      if (obj->isHidden().value_or(false))
+        continue;
+
       auto objectType = obj->objectType();
 
       if (objectType == CLottieObject::Type::SHAPE) {
@@ -2799,7 +2988,6 @@ getDrawFillShape(const DrawState &drawState) const
   }
 
   return nullptr;
-#endif
 }
 
 CQLottie::OptColor
@@ -2908,6 +3096,8 @@ getFillOpacity(const TimeFrame &timeFrame, const CLottieShape *shape, const OptR
     if (o) return o;
   }
 
+  // TODO: transform opacity not inherited !
+
   if (shape->transform()) {
     o = shape->transform()->opacity.tvalue(timeFrame);
     if (o) return o;
@@ -2970,40 +3160,13 @@ getHierStrokeColor(const DrawState &drawState, const CLottieShape *shape, const 
   c = getStrokeColor(drawState.timeFrame, shape, def);
   if (c) return c;
 
-#if 0
-  auto *pshape = shape->getParentShape();
-
-  if (pshape)
-    c = getHierStrokeColor(drawState, pshape);
-#else
-#if 0
-  for (const auto &objData : drawState.objects) {
-    auto *obj = objData.object;
-
-    auto objectType = obj->objectType();
-
-    if      (objectType == CLottieObject::Type::LAYER) {
-      auto *layer1 = dynamic_cast<CLottieLayer *>(obj);
-
-      auto *strokeShape = layer1->getStrokeShape();
-
-      if (strokeShape) {
-        c = getStrokeColor(drawState.timeFrame, strokeShape, def);
-        if (c) return c;
-      }
-    }
-    else if (objectType == CLottieObject::Type::SHAPE) {
-      auto *shape1 = dynamic_cast<CLottieShape *>(obj);
-
-      c = getStrokeColor(drawState.timeFrame, shape1, def);
-      if (c) return c;
-    }
-  }
-#else
   for (const auto &objData : drawState.objects) {
     bool strokeFill = false;
 
     for (auto *obj : objData.siblings) {
+      if (obj->isHidden().value_or(false))
+        continue;
+
       auto objectType = obj->objectType();
 
       if (objectType == CLottieObject::Type::SHAPE) {
@@ -3023,8 +3186,6 @@ getHierStrokeColor(const DrawState &drawState, const CLottieShape *shape, const 
     if (strokeFill)
       break;
   }
-#endif
-#endif
 
   return (c ? c : def);
 }
@@ -3037,6 +3198,9 @@ getDrawStrokeShape(const DrawState &drawState) const
 
   for (const auto &objData : drawState.objects) {
     auto *obj = objData.object;
+
+    if (obj->isHidden().value_or(false))
+      continue;
 
     auto objectType = obj->objectType();
 
@@ -3188,6 +3352,9 @@ getDrawGradientFillShape(const DrawState &drawState) const
   for (const auto &objData : drawState.objects) {
     auto *obj = objData.object;
 
+    if (obj->isHidden().value_or(false))
+      continue;
+
     auto objectType = obj->objectType();
 
     if      (objectType == CLottieObject::Type::LAYER) {
@@ -3227,6 +3394,9 @@ getDrawGradientStrokeShape(const DrawState &drawState) const
 {
   for (const auto &objData : drawState.objects) {
     auto *obj = objData.object;
+
+    if (obj->isHidden().value_or(false))
+      continue;
 
     auto objectType = obj->objectType();
 
@@ -3275,8 +3445,8 @@ hierName(CLottieObject *object, const DrawState &drawState) const
     if (name1 == "") {
       auto *asset = dynamic_cast<CLottieAsset *>(objData.object);
 
-      if (asset)
-        name1 = asset->id();
+      if (asset && asset->id())
+        name1 = asset->id().value();
     }
 
     if (name1 == "")
@@ -3464,7 +3634,7 @@ CQLottieLayer(CQLottie *lottie) :
 CQLottieLayer::
 ~CQLottieLayer()
 {
-  delete painter_;
+  delete imagePainter_.painter;
 }
 
 void
@@ -3475,11 +3645,10 @@ resize(int w, int h)
     w_ = w;
     h_ = h;
 
-    delete painter_;
+    delete imagePainter_.painter;
 
-    painter_ = nullptr;
-
-    image_ = QImage();
+    imagePainter_.painter = nullptr;
+    imagePainter_.image   = QImage();
   }
 }
 
@@ -3487,15 +3656,21 @@ QPainter *
 CQLottieLayer::
 painter()
 {
-  if (! painter_) {
-    image_ = QImage(w_, h_, QImage::Format_ARGB32);
+  if (! imagePainter_.painter)
+    createImagePainter(imagePainter_);
 
-    image_.fill(Qt::transparent);
+  return imagePainter_.painter;
+}
 
-    painter_ = new QPainter(&image_);
-  }
+void
+CQLottieLayer::
+createImagePainter(ImagePainter &imagePainter) const
+{
+  imagePainter.image = QImage(w_, h_, QImage::Format_ARGB32);
 
-  return painter_;
+  imagePainter.image.fill(Qt::transparent);
+
+  imagePainter.painter = new QPainter(&imagePainter.image);
 }
 
 void
@@ -3504,16 +3679,89 @@ clear()
 {
   (void) painter();
 
-  image_.fill(Qt::transparent);
+  imagePainter_.image.fill(Qt::transparent);
 }
 
 //---
 
 QImage
 CQLottieUtil::
+fillImage(const QImage &sourceImage, const CRGBA &color)
+{
+  CElapsedTimer etime("CQLottieUtil::fillImage");
+
+  int iw = sourceImage.width ();
+  int ih = sourceImage.height();
+
+#if 0
+  auto resultImage = QImage(iw, ih, QImage::Format_ARGB32);
+
+  auto qcolor = CQLottieUtil::toQColor(color);
+
+  for (int y = 0; y < ih; ++y) {
+    for (int x = 0; x < iw; ++x) {
+      auto c = sourceImage.pixelColor(x, y);
+
+      if (c.alpha() > 0) {
+        resultImage.setPixelColor(x, y, qcolor);
+      }
+    }
+  }
+#else
+  auto resultImage = sourceImage;
+
+  auto qrgb = CQLottieUtil::toQColor(color).rgb();
+
+  for (int y = 0; y < ih; ++y) {
+    auto *l = reinterpret_cast<QRgb *>(resultImage.scanLine(y));
+
+    for (int x = 0; x < iw; ++x) {
+      const auto &rgb1 = l[x];
+
+      if (qAlpha(rgb1) > 0)
+        l[x] = qrgb;
+    }
+  }
+#endif
+
+  return resultImage;
+}
+
+QImage
+CQLottieUtil::
+alphaImage(const QImage &sourceImage, double a)
+{
+  CElapsedTimer etime("CQLottieUtil::alphaImage");
+
+  int iw = sourceImage.width ();
+  int ih = sourceImage.height();
+
+  auto resultImage = sourceImage;
+
+  for (int y = 0; y < ih; ++y) {
+    auto *l = reinterpret_cast<QRgb *>(resultImage.scanLine(y));
+
+    for (int x = 0; x < iw; ++x) {
+      const auto &rgb = l[x];
+
+      auto a1 = a*qAlpha(rgb)/255.0;
+
+      auto rgb1 = qRgba(qRed(rgb), qGreen(rgb), qBlue(rgb), int(a1*255.0));
+
+      l[x] = rgb1;
+    }
+  }
+
+  return resultImage;
+}
+
+QImage
+CQLottieUtil::
 applyDropShadow(const QImage &sourceImage, int blurRadius, const QColor &shadowColor,
                 const QPointF &offset)
 {
+  CElapsedTimer etime("CQLottieUtil::applyDropShadow");
+
   if (sourceImage.isNull())
     return QImage();
 

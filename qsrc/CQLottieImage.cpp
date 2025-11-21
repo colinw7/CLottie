@@ -4,6 +4,7 @@
 #include <CQColorChooser.h>
 
 #include <QLabel>
+#include <QCheckBox>
 #include <QVBoxLayout>
 
 CQLottieImage::
@@ -25,21 +26,38 @@ CQLottieImage()
 
   bgColor_->setStyles(CQColorChooser::Text | CQColorChooser::ColorButton);
 
-  connect(bgColor_, SIGNAL(colorChanged(const QColor &)), this, SLOT(bgColorChanged()));
+  checkerBoardCheck_ = new QCheckBox("Checker Board");
 
   controlLayout->addWidget(infoLabel_);
   controlLayout->addStretch(1);
   controlLayout->addWidget(bgColor_);
+  controlLayout->addWidget(checkerBoardCheck_);
 
   //---
 
   imageDisplay_ = new CQImageDisplay;
+
+  imageDisplay_->setBackground(QColor(Qt::white));
 
   layout->addWidget(imageDisplay_);
 
   //---
 
   bgColor_->setColor(imageDisplay_->background());
+
+  //---
+
+  checkerBoardCheck_->setChecked(imageDisplay_->isCheckerBoard());
+
+  connectSlots();
+}
+
+void
+CQLottieImage::
+connectSlots()
+{
+  connect(bgColor_, SIGNAL(colorChanged(const QColor &)), this, SLOT(bgColorChanged()));
+  connect(checkerBoardCheck_, SIGNAL(stateChanged(int)), this, SLOT(checkerBoardSlot(int)));
 }
 
 QImage
@@ -74,6 +92,15 @@ bgColorChanged()
   auto *chooser = qobject_cast<CQColorChooser *>(sender());
 
   imageDisplay_->setBackground(chooser->color());
+
+  imageDisplay_->update();
+}
+
+void
+CQLottieImage::
+checkerBoardSlot(int state)
+{
+  imageDisplay_->setCheckerBoard(state);
 
   imageDisplay_->update();
 }

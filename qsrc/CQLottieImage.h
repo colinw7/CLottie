@@ -8,6 +8,7 @@ class CQImageDisplay;
 class CQColorChooser;
 
 class QLabel;
+class QCheckBox;
 
 class CQLottieImage : public QFrame {
   Q_OBJECT
@@ -20,11 +21,16 @@ class CQLottieImage : public QFrame {
 
  private Q_SLOTS:
   void bgColorChanged();
+  void checkerBoardSlot(int);
 
  private:
-  CQImageDisplay* imageDisplay_ { nullptr };
-  QLabel*         infoLabel_    { nullptr };
-  CQColorChooser* bgColor_      { nullptr };
+  void connectSlots();
+
+ private:
+  CQImageDisplay* imageDisplay_      { nullptr };
+  QLabel*         infoLabel_         { nullptr };
+  CQColorChooser* bgColor_           { nullptr };
+  QCheckBox*      checkerBoardCheck_ { nullptr };
 };
 
 #endif

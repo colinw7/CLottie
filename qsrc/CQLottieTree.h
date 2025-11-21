@@ -43,6 +43,8 @@ class CQLottieTree : public QFrame {
   void expandAll  (const QModelIndex &ind=QModelIndex());
   void collapseAll(const QModelIndex &ind=QModelIndex());
 
+  CLottieObject *getSelectedObject() const;
+
  private Q_SLOTS:
   void itemClickedSlot (QTreeWidgetItem *item, int column);
   void itemSelectedSlot(QTreeWidgetItem *, QTreeWidgetItem *);
@@ -58,6 +60,7 @@ class CQLottieTree : public QFrame {
   void zoomSlot();
   void imageSlot();
   void printSlot();
+  void printJsonSlot();
 
  private:
   CQLottie*           lottie_ { nullptr };

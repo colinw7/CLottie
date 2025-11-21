@@ -3,6 +3,7 @@
 
 #include <CLottie.h>
 #include <CDisplayRange2D.h>
+#include <CLineDash.h>
 
 #include <QFrame>
 #include <QPen>
@@ -93,6 +94,35 @@ inline Qt::PenJoinStyle toLineJoin(int lineJoin) {
     case 3: return Qt::BevelJoin;
   }
 }
+
+inline void penSetLineDash(QPen &pen, const CLineDash &dash) {
+  auto num = dash.getNumLengths();
+
+  if (num > 0) {
+    auto w = pen.widthF();
+    if (w < 0) w = 1.0;
+
+    pen.setStyle(Qt::CustomDashLine);
+
+    pen.setDashOffset(dash.getOffset()/w);
+
+    QVector<qreal> dashes;
+
+    for (int i = 0; i < int(num); ++i)
+      dashes << dash.getLength(i)/w;
+
+    if (num & 1)
+      dashes << dash.getLength(0)/w;
+
+    pen.setDashPattern(dashes);
+  }
+  else
+    pen.setStyle(Qt::SolidLine);
+}
+
+QImage fillImage(const QImage &sourceImage, const CRGBA &color);
+
+QImage alphaImage(const QImage &sourceImage, double a);
 
 QImage applyDropShadow(const QImage &sourceImage, int blurRadius, const QColor &shadowColor,
                        const QPointF &offset);
@@ -190,7 +220,7 @@ class CQLottie : public QWidget {
   CLottieAsset *getPrecompLayerAsset(const CLottieLayer *layer) const;
   CLottieAsset *getLayerAsset(const CLottieLayer *layer) const;
 
-  QImage getAssetImage(CLottieAsset *asset) const;
+  QImage getAssetImage(CLottieAsset *asset, bool create=true) const;
 
   //---
 
@@ -242,10 +272,16 @@ class CQLottie : public QWidget {
     CMatrixStack2D       smatrix;
   };
 
+  using PathDatas = std::vector<PathData>;
+
+  struct MaskData {
+    CLottieLayer::Mask* mask { nullptr };
+    PathDatas           paths;
+  };
+
   struct DrawState {
     using TimeFrame = CLottieUtil::TimeFrame;
     using Paths     = std::vector<CBezierPath>;
-    using PathDatas = std::vector<PathData>;
 
     // current fill (TODO: remove)
     struct Fill {
@@ -313,6 +349,8 @@ class CQLottie : public QWidget {
     Merge    merge;
     Rounded  rounded;
 
+    MaskData* maskData { nullptr };
+
     //---
 
 #if 0
@@ -338,10 +376,11 @@ class CQLottie : public QWidget {
 
     QPainterPathStroker *stroker { nullptr };
 
-    OptReal strokeWidth;
-    OptInt  strokeLineCap;
-    OptInt  strokeLineJoin;
-    OptReal strokeMiterLimit;
+    OptReal   strokeWidth;
+    OptInt    strokeLineCap;
+    OptInt    strokeLineJoin;
+    CLineDash strokeLineDash;
+    OptReal   strokeMiterLimit;
   };
 
   struct RectData {
@@ -357,6 +396,8 @@ class CQLottie : public QWidget {
 
   void drawLayer(const DrawState &state, CLottieLayer *layer, bool update);
   void drawShape(DrawState &state, CLottieShape *shape);
+
+  void maskLayer(const DrawState &drawState, MaskData *maskData, CLottieLayer *layer);
 
 //void gradientFillShape  (DrawState &state, const CLottieShape *shape);
 //void gradientStrokeShape(DrawState &state, const CLottieShape *shape);
@@ -387,6 +428,10 @@ class CQLottie : public QWidget {
   CLottieShape *getDrawMergeShape(const DrawState &drawState) const;
   CLottieShape *getDrawTrimShape (const DrawState &drawState) const;
 
+  QPainterPath drawPathData(QPainter *painter, const PathData &pathData) const;
+  QPainterPath drawPathDataPath(QPainter *painter, const PathData &pathData,
+                                const QPainterPath &ppath) const;
+
   void addSelectedRect(QPainter *painter, const QRectF &rect);
   void addSelectedPath(QPainter *painter, const QPainterPath &path);
 
@@ -396,8 +441,8 @@ class CQLottie : public QWidget {
   QGradient calcGradientFill(const TimeFrame &timeFrame,
                              CLottieShape::GradientFill *gradientFill) const;
 
-  QLinearGradient calcGradientStroke(const TimeFrame &timeFrame,
-                                     CLottieShape::GradientStroke *gradientStroke) const;
+  QGradient calcGradientStroke(const TimeFrame &timeFrame,
+                               CLottieShape::GradientStroke *gradientStroke) const;
 
   CBezierPath getEllipsePath(const TimeFrame &timeFrame, const CLottieShape *shape) const;
   CBezierPath getPolyStarPath(const TimeFrame &timeFrame, const CLottieShape *shape) const;
@@ -468,6 +513,8 @@ class CQLottie : public QWidget {
 
   std::string hierName(CLottieObject *object, const DrawState &drawState) const;
 
+  void drawPainterPath(QPainter *painter, const QPainterPath &path) const;
+
  private:
   CQLottieToolBar*    toolbar_     { nullptr };
   CQLottieSettings*   settings_    { nullptr };
@@ -487,6 +534,9 @@ class CQLottie : public QWidget {
 
   bool running_ { false };
 
+  int w_ { 100 };
+  int h_ { 100 };
+
   double fps_ { 30.0 };
   double dt_  { 0.0 };
 
@@ -495,7 +545,13 @@ class CQLottie : public QWidget {
   double  secs_  { 0.0 };
   uint    isecs_ { 0 };
 
-  using AssetImage = std::map<std::string, QImage>;
+  struct ImageData {
+    QImage image;
+    int    width  { 0 };
+    int    height { 0 };
+  };
+
+  using AssetImage = std::map<std::string, ImageData>;
 
   AssetImage assetImage_;
 
@@ -534,6 +590,12 @@ class CQLottieAsset : public CLottieAsset {
 
 class CQLottieLayer : public CLottieLayer {
  public:
+  struct ImagePainter {
+    QImage    image;
+    QPainter* painter { nullptr };
+  };
+
+ public:
   CQLottieLayer(CQLottie *lottie);
  ~CQLottieLayer() override;
 
@@ -568,7 +630,10 @@ class CQLottieLayer : public CLottieLayer {
 
   QPainter *painter();
 
-  const QImage &image() const { return image_; }
+  void createImagePainter(ImagePainter &imagePainter) const;
+
+  const QImage &image() const { return imagePainter_.image; }
+  void setImage(const QImage &i) { imagePainter_.image = i; }
 
   void clear();
 
@@ -588,8 +653,7 @@ class CQLottieLayer : public CLottieLayer {
 
   QImage effectImage_;
 
-  QImage    image_;
-  QPainter* painter_ { nullptr };
+  ImagePainter imagePainter_;
 
   std::string hierName_;
 };

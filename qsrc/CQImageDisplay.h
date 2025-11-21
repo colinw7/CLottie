@@ -26,6 +26,9 @@ class CQImageDisplay : public QWidget {
   const QColor &background() const;
   void setBackground(const QColor &rgba);
 
+  bool isCheckerBoard() const;
+  void setCheckerBoard(bool b);
+
   QScrollArea *getScrollArea() const { return sarea_; }
 
   void sendCancelSignal();
@@ -54,11 +57,14 @@ class CQImageDisplayCanvas : public QWidget {
   QImage getImage() const { return image_; }
   void setImage(QImage image);
 
+  bool getFillScreen() const { return fillScreen_; }
   void setFillScreen(bool fillScreen) { fillScreen_ = fillScreen; }
+
+  bool getKeepAspect() const { return keepAspect_; }
   void setKeepAspect(bool keepAspect) { keepAspect_ = keepAspect; }
 
-  bool getFillScreen() const { return fillScreen_; }
-  bool getKeepAspect() const { return keepAspect_; }
+  bool isCheckerBoard() const { return checkerBoard_; }
+  void setCheckerBoard(bool b) { checkerBoard_ = b; }
 
   const QColor &background() const;
   void setBackground(const QColor &bg);
@@ -69,10 +75,14 @@ class CQImageDisplayCanvas : public QWidget {
   void keyPressEvent(QKeyEvent *e) override;
 
  private:
-  CQImageDisplay* view_       { nullptr };
+  void drawCheckerboard(QPainter *painter, int cs) const;
+
+ private:
+  CQImageDisplay* view_         { nullptr };
   QImage          image_;
-  bool            fillScreen_ { false };
-  bool            keepAspect_ { true };
+  bool            fillScreen_   { false };
+  bool            keepAspect_   { true };
+  bool            checkerBoard_ { true };
   QColor          bg_;
 };
 

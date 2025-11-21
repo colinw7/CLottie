@@ -216,8 +216,28 @@ bool stringToValue(const std::string &str, std::optional<T> &t) {
 }
 
 template<>
+inline bool stringToValue<bool>(const std::string &str, bool &b) {
+  int i;
+  if (! CStrUtil::toInteger(str, &i))
+    return false;
+  b = i;
+  return true;
+}
+
+template<>
+inline bool stringToValue<int>(const std::string &str, int &i) {
+  return CStrUtil::toInteger(str, &i);
+}
+
+template<>
 inline bool stringToValue<double>(const std::string &str, double &r) {
   return CStrUtil::toReal(str, &r);
+}
+
+template<>
+inline bool stringToValue<std::string>(const std::string &str, std::string &s) {
+  s = str;
+  return true;
 }
 
 template<>
@@ -360,6 +380,7 @@ class CLottieVariant {
  public:
   enum class Type {
     NONE,
+    BOOL,
     REAL,
     INTEGER,
     STRING,
@@ -371,8 +392,25 @@ class CLottieVariant {
 
   virtual ~CLottieVariant() { }
 
+  virtual bool hasValue() const = 0;
+
   virtual std::string value() const = 0;
   virtual bool setValue(const std::string &) const = 0;
+
+  bool bvalue(bool def=false) const {
+    if (! hasValue()) return def;
+    return !!CStrUtil::toInteger(value());
+  }
+
+  int ivalue(int def=0) const {
+    if (! hasValue()) return def;
+    return int(CStrUtil::toInteger(value()));
+  }
+
+  double rvalue(double def=0.0) const {
+    if (! hasValue()) return def;
+    return CStrUtil::toReal(value());
+  }
 
  private:
   Type type_ { Type::NONE };
@@ -383,6 +421,10 @@ class CLottieVariantT : public CLottieVariant {
  public:
   CLottieVariantT(T *data) :
    data_(data) {
+  }
+
+  bool hasValue() const override {
+    return (CLottieUtil::valueToString(*data_) != "");
   }
 
   std::string value() const override {
@@ -485,6 +527,9 @@ class CLottieProperty {
   //---
 
   virtual std::string tvalueStr(const TimeFrame &frame) const = 0;
+
+  virtual std::string minStr() const = 0;
+  virtual std::string maxStr() const = 0;
 
   //---
 
@@ -701,6 +746,16 @@ class CLottie {
       return CLottieUtil::valueToString(*value);
     }
 
+    std::string minStr() const override {
+      if (min_) return CLottieUtil::valueToString(*min_);
+      return "";
+    }
+
+    std::string maxStr() const override {
+      if (max_) return CLottieUtil::valueToString(*max_);
+      return "";
+    }
+
     //---
 
     bool setValueStr(const std::string &str) override {
@@ -770,8 +825,10 @@ class CLottie {
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
-      if (! keyFrame1->endValue.vals.empty())
+      if      (! keyFrame1->endValue.vals.empty())
         v2 = keyFrame1->endValue.vals[0];
+      else if (! keyFrame2->startValue.vals.empty())
+        v2 = keyFrame2->startValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
@@ -806,14 +863,20 @@ class CLottie {
    public:
     std::vector<T>          values;
     std::vector<KeyFrame *> keyFrames;
+
+   protected:
+    std::optional<T> min_;
+    std::optional<T> max_;
   };
 
   //---
 
   class ScalarProperty : public PropertyT<double> {
    public:
-    ScalarProperty() :
+    ScalarProperty(double min=0.0, double max=100.0) :
      PropertyT(Type::SCALAR) {
+      min_ = min;
+      max_ = max;
     }
   };
 
@@ -835,8 +898,16 @@ class CLottie {
     }
 
     bool isSet() const override {
+      if (split().value_or(false))
+        return x.isSet() && y.isSet();
+
       return (! values.empty() || ! keyFrames.empty());
     }
+
+    //---
+
+    const OptBool &split() const { return split_; }
+    void setSplit(const OptBool &v) { split_ = v; }
 
     //---
 
@@ -853,25 +924,31 @@ class CLottie {
 
       CLottieProperty::print(prefix);
 
-      if (! values.empty()) {
-        printValue("values", "");
-
-        for (auto &v : values) {
-          std::cout << prefix << "  " << v << "\n";
-        }
+      if (split().value_or(false)) {
+        x.print(prefix);
+        y.print(prefix);
       }
+      else {
+        if (! values.empty()) {
+          printValue("values", "");
 
-      if (! keyFrames.empty()) {
-        printValue("KeyFrames", "");
+          for (auto &v : values) {
+            std::cout << prefix << "  " << v << "\n";
+          }
+        }
 
-        int i = 0;
+        if (! keyFrames.empty()) {
+          printValue("KeyFrames", "");
 
-        for (auto *kf : keyFrames) {
-          std::cout << prefix << " Frame [" << i << "]\n";
+          int i = 0;
 
-          kf->print(prefix + "  ");
+          for (auto *kf : keyFrames) {
+            std::cout << prefix << " Frame [" << i << "]\n";
 
-          ++i;
+            kf->print(prefix + "  ");
+
+            ++i;
+          }
         }
       }
     }
@@ -879,29 +956,69 @@ class CLottie {
     //---
 
     std::string tvalueStr(const TimeFrame &frame) const override {
-      auto value = tvalue(frame);
-      if (! value) return "<none>";
-      return CLottieUtil::valueToString(*value);
+      if (split().value_or(false)) {
+        return "(" + x.tvalueStr(frame) + " " + y.tvalueStr(frame) + ")";
+      }
+      else {
+        auto value = tvalue(frame);
+        if (! value) return "<none>";
+        return CLottieUtil::valueToString(*value);
+      }
+    }
+
+    std::string minStr() const override {
+      return "";
+    }
+
+    std::string maxStr() const override {
+      return "";
     }
 
     //---
 
     OptVal value(const OptVal &def=OptVal()) const {
-      if (values.empty())
-        return def;
+      if (split().value_or(false)) {
+        auto v1 = x.value();
+        auto v2 = y.value();
 
-      return values[0];
+        if (v1 && v2)
+          return CPoint2D(*v1, *v2);
+      }
+      else {
+        if (! values.empty())
+          return values[0];
+      }
+
+      return def;
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
-      if (isAnimated()) {
-        if (! isTSet())
-          return def;
+      if (split().value_or(false)) {
+        OptReal v1, v2;
 
-        return keyFrameValue(frame, def);
+        if (x.isAnimated())
+          v1 = x.tvalue(frame);
+        else
+          v1 = x.value();
+
+        if (y.isAnimated())
+          v2 = y.tvalue(frame);
+        else
+          v2 = y.value();
+
+        if (v1 && v2)
+          return CPoint2D(*v1, *v2);
       }
-      else
-        return value(def);
+      else {
+        if (isAnimated()) {
+          if (isTSet())
+            return keyFrameValue(frame, def);
+        }
+        else
+          return value(def);
+      }
+
+      return def;
     }
 
     OptVal keyFrameValue(const TimeFrame &frame, const OptVal &def) const {
@@ -935,8 +1052,10 @@ class CLottie {
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
-      if (! keyFrame1->endValue.vals.empty())
+      if      (! keyFrame1->endValue.vals.empty())
         v4 = keyFrame1->endValue.vals[0];
+      else if (! keyFrame2->startValue.vals.empty())
+        v4 = keyFrame2->startValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v4) {
@@ -1053,7 +1172,10 @@ class CLottie {
     std::vector<CPoint2D>   values;
     std::vector<KeyFrame *> keyFrames;
 
-    OptBool        split;
+   private:
+    OptBool split_;
+
+   public:
     ScalarProperty x;
     ScalarProperty y;
 
@@ -1125,6 +1247,14 @@ class CLottie {
       auto value = tvalue(frame);
       if (! value) return "<none>";
       return CLottieUtil::valueToString(*value);
+    }
+
+    std::string minStr() const override {
+      return "";
+    }
+
+    std::string maxStr() const override {
+      return "";
     }
 
     //---
@@ -1280,6 +1410,14 @@ class CLottie {
       return CLottieUtil::valueToString(*value);
     }
 
+    std::string minStr() const override {
+      return "";
+    }
+
+    std::string maxStr() const override {
+      return "";
+    }
+
     //---
 
     OptVal value(const OptVal &def=OptVal()) const {
@@ -1331,8 +1469,10 @@ class CLottie {
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
-      if (! keyFrame1->endValue.vals.empty())
+      if      (! keyFrame1->endValue.vals.empty())
         v2 = keyFrame1->endValue.vals[0];
+      else if (! keyFrame2->startValue.vals.empty())
+        v2 = keyFrame2->startValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
@@ -1431,6 +1571,14 @@ class CLottie {
       return CLottieUtil::valueToString(*value);
     }
 
+    std::string minStr() const override {
+      return "";
+    }
+
+    std::string maxStr() const override {
+      return "";
+    }
+
     //---
 
     OptVal value(const OptVal &def=OptVal()) const {
@@ -1482,8 +1630,10 @@ class CLottie {
       if (! keyFrame1->startValue.vals.empty())
         v1 = keyFrame1->startValue.vals[0];
 
-      if (! keyFrame1->endValue.vals.empty())
+      if      (! keyFrame1->endValue.vals.empty())
         v2 = keyFrame1->endValue.vals[0];
+      else if (! keyFrame2->startValue.vals.empty())
+        v2 = keyFrame2->startValue.vals[0];
 
       if (frameInd.pos == FramePos::INSIDE) {
         if (v1 && v2) {
@@ -1700,6 +1850,14 @@ class CLottie {
       }
 
       return bezierPath.toString();
+    }
+
+    std::string minStr() const override {
+      return "";
+    }
+
+    std::string maxStr() const override {
+      return "";
     }
 
     //---
@@ -2109,14 +2267,14 @@ class CLottie {
   struct Transform {
     PositionProperty      anchorPoint;
     SplitPositionProperty position;
-    ScalarProperty        rotation;
+    ScalarProperty        rotation { 0, 360 };
     VectorProperty        scale;
     ScalarProperty        opacity;
     ScalarProperty        skew;
     ScalarProperty        skewAxis;
-    ScalarProperty        x_rotation;
-    ScalarProperty        y_rotation;
-    ScalarProperty        z_rotation;
+    ScalarProperty        x_rotation { 0, 360 };
+    ScalarProperty        y_rotation { 0, 360 };
+    ScalarProperty        z_rotation { 0, 360 };
     VectorProperty        orientation;
 
     void* repeater { nullptr };
@@ -2125,10 +2283,28 @@ class CLottie {
   };
 
   // dash
-  struct Dash {
+  struct DashData {
     OptStr         type;
     OptStr         name;
     ScalarProperty value;
+  };
+
+  struct Dash {
+    using Datas = std::vector<DashData>;
+
+    std::map<std::string, Datas> data;
+
+    std::vector<ScalarProperty> offset;
+    std::vector<ScalarProperty> dash;
+    std::vector<ScalarProperty> gap;
+  };
+
+  struct StyleData {
+    OptInt type;
+    OptStr name;
+
+    ColorProperty  color;
+    ScalarProperty size;
   };
 
  public:
@@ -2238,8 +2414,10 @@ class CLottie {
   bool readTransform(const std::string &msg1, CJson::ValueP &value1, Transform *transform) const;
 
   bool readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *effect);
-  bool readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
-                       CLottieEffectValue *effectValue) const;
+  bool readEffectValues(const std::string &msg, const CJson::ValueP &iValue,
+                        std::vector<CLottieEffectValue *> &effectValues);
+
+  bool readStyleData(const std::string &msg, const CJson::ValueP &iValue, StyleData *styleData);
 
   bool getKeyFrameValues(const std::string &xyMsg, const std::string &name, CJson::ValueP &xyValue,
                          std::vector<XYVals> &xyValues) const;
@@ -2315,10 +2493,15 @@ class CLottie {
   using ShapeTypeCount  = std::map<int, int>;
   using EffectTypeCount = std::map<int, int>;
 
-  LayoutTypeCount layerTypeCount_;
-  ShapeTypeCount  shapeTypeCount_;
-  EffectTypeCount effectTypeCount_;
-  int             layerMatteCount_ { 0 };
+  struct StatsData {
+    LayoutTypeCount layerTypeCount;
+    ShapeTypeCount  shapeTypeCount;
+    EffectTypeCount effectTypeCount;
+    int             layerMatteCount { 0 };
+    int             layerMaskCount  { 0 };
+  };
+
+  StatsData statsData_;
 };
 
 //---
@@ -2449,10 +2632,18 @@ class CLottieObject {
   CLottieObject *parent() const { return parent_; }
   void setParent(CLottieObject *v) { parent_ = v; }
 
+  const OptStr &css() const { return css_; }
+  void setCss(const OptStr &v) { css_ = v; }
+
   //---
 
   const CBBox2D &bbox() const { return bbox_; }
   void setBBox(const CBBox2D &v) { bbox_ = v; }
+
+  //---
+
+  const CJson::ValueP &jsonValue() const { return jsonValue_; }
+  void setJsonValue(const CJson::ValueP &v) { jsonValue_ = v; }
 
   //---
 
@@ -2473,8 +2664,16 @@ class CLottieObject {
   //---
 
   virtual CLottieVariant *getVariant(const std::string &name) {
-    std::cerr << "No variant of name '" << name << "'\n";
-    return nullptr;
+    if      (name == "hidden") {
+      return new CLottieVariantT<OptBool>(&hidden_);
+    }
+    else if (name == "css") {
+      return new CLottieVariantT<OptStr>(&css_);
+    }
+    else {
+      std::cerr << "No variant of name '" << name << "'\n";
+      return nullptr;
+    }
   }
 
   virtual CLottieProperty *getProperty(const std::string &name) const {
@@ -2503,8 +2702,11 @@ class CLottieObject {
   OptBool        hidden_;
   OptInt         ind_;
   CLottieObject* parent_ { nullptr };
+  OptStr         css_;
 
   CBBox2D bbox_;
+
+  CJson::ValueP jsonValue_;
 };
 
 //---
@@ -2615,11 +2817,8 @@ class CLottieAsset : public CLottieObject {
 
   //---
 
-  const std::string &id() const { return id_; }
-  void setId(const std::string &s) { id_ = s; }
-
-  const OptStr &css() const { return css_; }
-  void setCss(const OptStr &v) { css_ = v; }
+  const OptStr &id() const { return id_; }
+  void setId(const OptStr &s) { id_ = s; }
 
   const OptReal &width() const { return width_; }
   void setWidth(const OptReal &v) { width_ = v; }
@@ -2662,10 +2861,7 @@ class CLottieAsset : public CLottieObject {
  private:
   using LayerMap = std::map<int, CLottieLayer *>;
 
-  std::string id_;
-
-  OptStr css_;
-
+  OptStr  id_;
   OptReal width_;
   OptReal height_;
 
@@ -2716,6 +2912,9 @@ struct CLottieRepeater : public CLottieObject {
 
 class CLottieEffect : public CLottieObject {
  public:
+  using EffectValues = std::vector<CLottieEffectValue *>;
+
+ public:
   CLottieEffect(CLottie *lottie);
  ~CLottieEffect() override;
 
@@ -2740,8 +2939,10 @@ class CLottieEffect : public CLottieObject {
 
   CLottieLayer *getLayer() const;
 
+  const EffectValues &values() const { return values_; }
+
   void addValue(CLottieEffectValue *value) {
-    children_.push_back(value);
+    values_.push_back(value);
   }
 
   void printI(const std::string &prefix, bool hier) const override;
@@ -2750,8 +2951,6 @@ class CLottieEffect : public CLottieObject {
   using OptInt = std::optional<int>;
   using OptStr = std::optional<std::string>;
 
-  using EffectValues = std::vector<CLottieEffectValue *>;
-
   OptInt type_;
   OptStr match_;
   OptInt index_;
@@ -2759,7 +2958,7 @@ class CLottieEffect : public CLottieObject {
   OptInt numProperties_;
   OptInt enabled_;
 
-  EffectValues children_;
+  EffectValues values_;
 };
 
 class CLottieEffectValue {
@@ -2769,35 +2968,39 @@ class CLottieEffectValue {
   }
 
  public:
-  using OptInt = std::optional<int>;
-  using OptStr = std::optional<std::string>;
+  void print(const std::string &prefix="") const;
 
-  using ScalarProperty = CLottie::ScalarProperty;
-  using ColorProperty  = CLottie::ColorProperty;
-  using VectorProperty = CLottie::VectorProperty;
+ public:
+  using OptInt  = std::optional<int>;
+  using OptReal = std::optional<double>;
+  using OptStr  = std::optional<std::string>;
+
+  using OptScalarProperty = std::optional<CLottie::ScalarProperty>;
+  using OptColorProperty  = std::optional<CLottie::ColorProperty>;
+  using OptVectorProperty = std::optional<CLottie::VectorProperty>;
 
   CLottie* lottie_ { nullptr };
+
+  CLottieEffect* parent { nullptr };
 
   OptInt type;
   OptStr name;
   OptStr match;
   OptInt index;
 
-  OptInt         ivalue;
-  ScalarProperty scalar;
-  ColorProperty  color;
-  VectorProperty point;
-  double         number { 0 };
-
-  CLottieEffect* parent { nullptr };
-
-  void print(const std::string &prefix="") const;
+  OptInt            ivalue;
+  OptScalarProperty scalar;
+  OptColorProperty  color;
+  OptVectorProperty point;
+  OptReal           number;
 };
 
 //---
 
 class CLottieLayer : public CLottieObject {
  public:
+  using StyleData = CLottie::StyleData;
+
   using Layers = std::vector<CLottieLayer *>;
   using Shapes = std::vector<CLottieShape *>;
 
@@ -2884,9 +3087,6 @@ class CLottieLayer : public CLottieObject {
   const OptStr &matchName() const { return matchName_; }
   void setMatchName(const OptStr &v) { matchName_ = v; }
 
-  const OptStr &css() const { return css_; }
-  void setCss(const OptStr &v) { css_ = v; }
-
   const OptReal &frameIn() const { return frameIn_; }
   void setFrameIn(const OptReal &v) { frameIn_ = v; }
 
@@ -2919,6 +3119,9 @@ class CLottieLayer : public CLottieObject {
 
   CLottieEffect *effect() const { return effect_; }
   CLottieEffect *getEffect();
+
+  StyleData *styleData() const { return styleData_; }
+  StyleData *getStyleData();
 
   Solid *solid() const { return solid_; }
 
@@ -2973,6 +3176,17 @@ class CLottieLayer : public CLottieObject {
     }
     else if (name == "frameOut") {
       return new CLottieVariantT<OptReal>(&frameOut_);
+    }
+    else if (name == "matteMode") {
+      return new CLottieVariantT<OptInt>(&matteMode_);
+    }
+    else if (name == "mask.mode") {
+      if (! mask()) return nullptr;
+      return new CLottieVariantT<OptStr>(&mask_->mode);
+    }
+    else if (name == "mask.inverted") {
+      if (! mask()) return nullptr;
+      return new CLottieVariantT<OptBool>(&mask_->inverted);
     }
     else
       return CLottieObject::getVariant(name);
@@ -3057,7 +3271,6 @@ class CLottieLayer : public CLottieObject {
   LayerType layerType_ { LayerType::UNKNOWN };
 
   OptStr matchName_;
-  OptStr css_;
 
   OptBool threeD_;
   OptBool autoOrient_;
@@ -3083,10 +3296,11 @@ class CLottieLayer : public CLottieObject {
   // transform
   Transform *transform_ { nullptr };
 
-  Mask*          mask_    { nullptr };
-  CLottieEffect* effect_  { nullptr };
-  Solid*         solid_   { nullptr };
-  Precomp*       precomp_ { nullptr };
+  Mask*          mask_      { nullptr };
+  CLottieEffect* effect_    { nullptr };
+  StyleData*     styleData_ { nullptr };
+  Solid*         solid_     { nullptr };
+  Precomp*       precomp_   { nullptr };
 
   Shapes shapes_;
 
@@ -3118,7 +3332,7 @@ class CLottieShape : public CLottieObject {
 
   // rectangle
   struct Rectangle {
-    ScalarProperty roundness;
+    ScalarProperty roundness { 0, 100 };
 
     void print(const std::string &prefix="") const;
   };
@@ -3184,6 +3398,8 @@ class CLottieShape : public CLottieObject {
     OptInt         lineJoin;
     OptReal        miterLimit;
     Dash           dash;
+    OptInt         fillRule;
+    ColorProperty  color;
 
     void print(const std::string &prefix="") const;
   };
@@ -3201,10 +3417,10 @@ class CLottieShape : public CLottieObject {
     OptInt           type;
     PositionProperty position;
     ScalarProperty   innerRadius;
-    ScalarProperty   innerRoundness;
+    ScalarProperty   innerRoundness { 0, 100 };
     ScalarProperty   outerRadius;
-    ScalarProperty   outerRoundness;
-    ScalarProperty   rotation;
+    ScalarProperty   outerRoundness { 0, 100 };
+    ScalarProperty   rotation { 0, 360 };
     ScalarProperty   points;
 
     void print(const std::string &prefix="") const;
@@ -3217,7 +3433,7 @@ class CLottieShape : public CLottieObject {
   };
 
   struct Rounded {
-    ScalarProperty roundness;
+    ScalarProperty roundness { 0, 100 };
 
     void print(const std::string &prefix="") const;
   };
@@ -3396,6 +3612,43 @@ class CLottieShape : public CLottieObject {
 
   //---
 
+  CLottieVariant *getVariant(const std::string &name) override {
+    if      (name == "stroke.lineCap") {
+      if (stroke_)
+        return new CLottieVariantT<OptInt>(&stroke_->lineCap);
+      else
+        return nullptr;
+    }
+    else if (name == "stroke.lineJoin") {
+      if (stroke_)
+        return new CLottieVariantT<OptInt>(&stroke_->lineJoin);
+      else
+        return nullptr;
+    }
+    else if (name == "stroke.miterLimit") {
+      if (stroke_)
+        return new CLottieVariantT<OptReal>(&stroke_->miterLimit);
+      else
+        return nullptr;
+    }
+    else if (name == "fill.fillRule") {
+      if (fill_)
+        return new CLottieVariantT<OptInt>(&fill_->fillRule);
+      else
+        return nullptr;
+    }
+    else if (name == "fill.blendMode") {
+      if (fill_)
+        return new CLottieVariantT<OptInt>(&fill_->blendMode);
+      else
+        return nullptr;
+    }
+    else
+      return CLottieObject::getVariant(name);
+  }
+
+  //---
+
   CLottieProperty *getProperty(const std::string &name) const override {
     if      (name == "position") {
       return const_cast<PositionProperty *>(&pos_);
@@ -3477,9 +3730,17 @@ class CLottieShape : public CLottieObject {
       if (! stroke()) return nullptr;
       return &stroke()->miterLimitAnim;
     }
-    else if (name == "stroke.dash.value") {
-      if (! stroke()) return nullptr;
-      return &stroke()->dash.value;
+    else if (name == "stroke.dash.offset") {
+      if (! stroke() || stroke()->dash.offset.empty()) return nullptr;
+      return &stroke()->dash.offset[0];
+    }
+    else if (name == "stroke.dash.dash") {
+      if (! stroke() || stroke()->dash.dash.empty()) return nullptr;
+      return &stroke()->dash.dash[0];
+    }
+    else if (name == "stroke.dash.gap") {
+      if (! stroke() || stroke()->dash.gap.empty()) return nullptr;
+      return &stroke()->dash.gap[0];
     }
     else if (name == "group.color") {
       if (! group()) return nullptr;
@@ -3529,9 +3790,17 @@ class CLottieShape : public CLottieObject {
       if (! gradientStroke()) return nullptr;
       return &gradientStroke()->width;
     }
-    else if (name == "gradientStroke.dash.value") {
-      if (! gradientStroke()) return nullptr;
-      return &gradientStroke()->dash.value;
+    else if (name == "gradientStroke.dash.offset") {
+      if (! gradientStroke() || gradientStroke()->dash.offset.empty()) return nullptr;
+      return &gradientStroke()->dash.offset[0];
+    }
+    else if (name == "gradientStroke.dash.dash") {
+      if (! gradientStroke() || gradientStroke()->dash.dash.empty()) return nullptr;
+      return &gradientStroke()->dash.dash[0];
+    }
+    else if (name == "gradientStroke.dash.gap") {
+      if (! gradientStroke() || gradientStroke()->dash.gap.empty()) return nullptr;
+      return &gradientStroke()->dash.gap[0];
     }
     else if (name == "repeater.copies") {
       if (! repeater()) return nullptr;

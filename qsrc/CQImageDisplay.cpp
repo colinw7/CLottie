@@ -74,6 +74,22 @@ setBackground(const QColor &bg)
   canvas_->update();
 }
 
+bool
+CQImageDisplay::
+isCheckerBoard() const
+{
+  return canvas_->isCheckerBoard();
+}
+
+void
+CQImageDisplay::
+setCheckerBoard(bool b)
+{
+  canvas_->setCheckerBoard(b);
+
+  canvas_->update();
+}
+
 //----------
 
 CQImageDisplayCanvas::
@@ -128,7 +144,10 @@ paintEvent(QPaintEvent *)
 {
   QPainter painter(this);
 
-  painter.fillRect(rect(), bg_);
+  if (isCheckerBoard())
+    drawCheckerboard(&painter, 32);
+  else
+    painter.fillRect(rect(), bg_);
 
   if (image_.isNull()) return;
 
@@ -150,4 +169,28 @@ void
 CQImageDisplayCanvas::
 keyPressEvent(QKeyEvent *)
 {
+}
+
+void
+CQImageDisplayCanvas::
+drawCheckerboard(QPainter *painter, int cs) const
+{
+  int w = painter->device()->width ();
+  int h = painter->device()->height();
+
+  int nc = (w + cs - 1)/cs;
+  int nr = (h + cs - 1)/cs;
+
+  for (int r = 0; r < nr; ++r) {
+    int y = r*cs;
+
+    for (int c = 0; c < nc; ++c) {
+      int x = c*cs;
+
+      if ((r + c) & 1)
+        painter->fillRect(QRect(x, y, cs, cs), QColor(200, 200, 200));
+      else
+        painter->fillRect(QRect(x, y, cs, cs), Qt::white);
+    }
+  }
 }

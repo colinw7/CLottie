@@ -26,6 +26,10 @@ CQLottiePath.cpp \
 CQLottieImage.cpp \
 \
 CQImageDisplay.cpp \
+\
+CQDragSpin.cpp \
+CQDragArea.cpp \
+\
 QPainterPathUtil.cpp \
 
 HEADERS += \
@@ -41,6 +45,10 @@ CQLottiePath.h \
 CQLottieImage.h \
 \
 CQImageDisplay.h \
+\
+CQDragSpin.h \
+CQDragArea.h \
+\
 QPainterPathUtil.h \
 
 OBJECTS_DIR = ../obj

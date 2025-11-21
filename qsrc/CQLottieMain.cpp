@@ -1,5 +1,7 @@
 #include <CQLottieMain.h>
 
+#include <CHRTimer.h>
+
 #include <QApplication>
 
 int
@@ -10,6 +12,7 @@ main(int argc, char **argv)
   std::string filename;
   bool        debug = false;
   bool        print = false;
+  bool        timer = false;
 
   for (auto i = 1; i < argc; ++i) {
     if (argv[i][0] == '-') {
@@ -19,12 +22,17 @@ main(int argc, char **argv)
         debug = true;
       else if (arg == "print")
         print = true;
+      else if (arg == "timer")
+        timer = true;
       else
         std::cerr << "Unhandled option: " << arg << "\n";
     }
     else
       filename = argv[i];
   }
+
+  if (timer)
+    CHRTimerMgrInst->setActive(true);
 
   auto *lottie = new CQLottie;
 

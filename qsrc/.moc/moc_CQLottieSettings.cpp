@@ -22,8 +22,8 @@ QT_BEGIN_MOC_NAMESPACE
 QT_WARNING_PUSH
 QT_WARNING_DISABLE_DEPRECATED
 struct qt_meta_stringdata_CQLottieSettings_t {
-    QByteArrayData data[9];
-    char stringdata0[123];
+    QByteArrayData data[11];
+    char stringdata0[165];
 };
 #define QT_MOC_LITERAL(idx, ofs, len) \
     Q_STATIC_BYTE_ARRAY_DATA_HEADER_INITIALIZER_WITH_OFFSET(len, \
@@ -36,17 +36,20 @@ QT_MOC_LITERAL(0, 0, 16), // "CQLottieSettings"
 QT_MOC_LITERAL(1, 17, 14), // "equalScaleSlot"
 QT_MOC_LITERAL(2, 32, 0), // ""
 QT_MOC_LITERAL(3, 33, 10), // "bgFillSlot"
-QT_MOC_LITERAL(4, 44, 14), // "showSelectSlot"
-QT_MOC_LITERAL(5, 59, 16), // "selectedFillSlot"
-QT_MOC_LITERAL(6, 76, 18), // "selectedStrokeSlot"
-QT_MOC_LITERAL(7, 95, 12), // "showBBoxSlot"
-QT_MOC_LITERAL(8, 108, 14) // "bboxStrokeSlot"
+QT_MOC_LITERAL(4, 44, 20), // "showCheckerBoardSlot"
+QT_MOC_LITERAL(5, 65, 20), // "checkerBoardSizeSlot"
+QT_MOC_LITERAL(6, 86, 14), // "showSelectSlot"
+QT_MOC_LITERAL(7, 101, 16), // "selectedFillSlot"
+QT_MOC_LITERAL(8, 118, 18), // "selectedStrokeSlot"
+QT_MOC_LITERAL(9, 137, 12), // "showBBoxSlot"
+QT_MOC_LITERAL(10, 150, 14) // "bboxStrokeSlot"
 
     },
     "CQLottieSettings\0equalScaleSlot\0\0"
-    "bgFillSlot\0showSelectSlot\0selectedFillSlot\0"
-    "selectedStrokeSlot\0showBBoxSlot\0"
-    "bboxStrokeSlot"
+    "bgFillSlot\0showCheckerBoardSlot\0"
+    "checkerBoardSizeSlot\0showSelectSlot\0"
+    "selectedFillSlot\0selectedStrokeSlot\0"
+    "showBBoxSlot\0bboxStrokeSlot"
 };
 #undef QT_MOC_LITERAL
 
@@ -56,7 +59,7 @@ static const uint qt_meta_data_CQLottieSettings[] = {
        8,       // revision
        0,       // classname
        0,    0, // classinfo
-       7,   14, // methods
+       9,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -64,17 +67,21 @@ static const uint qt_meta_data_CQLottieSettings[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags
-       1,    1,   49,    2, 0x08 /* Private */,
-       3,    1,   52,    2, 0x08 /* Private */,
-       4,    1,   55,    2, 0x08 /* Private */,
-       5,    1,   58,    2, 0x08 /* Private */,
-       6,    1,   61,    2, 0x08 /* Private */,
-       7,    1,   64,    2, 0x08 /* Private */,
-       8,    1,   67,    2, 0x08 /* Private */,
+       1,    1,   59,    2, 0x08 /* Private */,
+       3,    1,   62,    2, 0x08 /* Private */,
+       4,    1,   65,    2, 0x08 /* Private */,
+       5,    1,   68,    2, 0x08 /* Private */,
+       6,    1,   71,    2, 0x08 /* Private */,
+       7,    1,   74,    2, 0x08 /* Private */,
+       8,    1,   77,    2, 0x08 /* Private */,
+       9,    1,   80,    2, 0x08 /* Private */,
+      10,    1,   83,    2, 0x08 /* Private */,
 
  // slots: parameters
     QMetaType::Void, QMetaType::Int,    2,
     QMetaType::Void, QMetaType::QColor,    2,
+    QMetaType::Void, QMetaType::Int,    2,
+    QMetaType::Void, QMetaType::Double,    2,
     QMetaType::Void, QMetaType::Int,    2,
     QMetaType::Void, QMetaType::QColor,    2,
     QMetaType::Void, QMetaType::QColor,    2,
@@ -92,11 +99,13 @@ void CQLottieSettings::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int
         switch (_id) {
         case 0: _t->equalScaleSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
         case 1: _t->bgFillSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
-        case 2: _t->showSelectSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
-        case 3: _t->selectedFillSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
-        case 4: _t->selectedStrokeSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
-        case 5: _t->showBBoxSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
-        case 6: _t->bboxStrokeSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
+        case 2: _t->showCheckerBoardSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
+        case 3: _t->checkerBoardSizeSlot((*reinterpret_cast< double(*)>(_a[1]))); break;
+        case 4: _t->showSelectSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
+        case 5: _t->selectedFillSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
+        case 6: _t->selectedStrokeSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
+        case 7: _t->showBBoxSlot((*reinterpret_cast< int(*)>(_a[1]))); break;
+        case 8: _t->bboxStrokeSlot((*reinterpret_cast< const QColor(*)>(_a[1]))); break;
         default: ;
         }
     }
@@ -131,13 +140,13 @@ int CQLottieSettings::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 7)
+        if (_id < 9)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 7;
+        _id -= 9;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 7)
+        if (_id < 9)
             *reinterpret_cast<int*>(_a[0]) = -1;
-        _id -= 7;
+        _id -= 9;
     }
     return _id;
 }

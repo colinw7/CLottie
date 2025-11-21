@@ -135,17 +135,20 @@ load(const std::string &file)
 
   if (isStats()) {
     for (auto *layer : layers_) {
-      layerTypeCount_[static_cast<int>(layer->layerType())]++;
+      statsData_.layerTypeCount[static_cast<int>(layer->layerType())]++;
 
       if (layer->matteTarget())
-        layerMatteCount_++;
+        statsData_.layerMatteCount++;
+
+      if (layer->mask())
+        statsData_.layerMaskCount++;
     }
 
     for (auto *shape : shapes_)
-      shapeTypeCount_[static_cast<int>(shape->shapeType())]++;
+      statsData_.shapeTypeCount[static_cast<int>(shape->shapeType())]++;
 
     for (auto *effect : effects_)
-      effectTypeCount_[static_cast<int>(effect->type().value_or(0))]++;
+      statsData_.effectTypeCount[static_cast<int>(effect->type().value_or(0))]++;
   }
 
   return true;
@@ -191,23 +194,26 @@ void
 CLottie::
 printStats() const
 {
-  for (const auto &pl : layerTypeCount_) {
+  for (const auto &pl : statsData_.layerTypeCount) {
     //auto layerType = static_cast<CLottieObject::LayerType>(pl.first);
     const char *str = CLottieLayer::typeIdName(pl.first);
 
     std::cerr << "Layer: " << str << " " << pl.second << "\n";
   }
 
-  if (layerMatteCount_ > 0)
-    std::cerr << "Matte Layers: " << layerMatteCount_ << "\n";
+  if (statsData_.layerMatteCount > 0)
+    std::cerr << "Matte Layers: " << statsData_.layerMatteCount << "\n";
 
-  for (const auto &ps : shapeTypeCount_) {
+  if (statsData_.layerMaskCount > 0)
+    std::cerr << "Mask Layers: " << statsData_.layerMaskCount << "\n";
+
+  for (const auto &ps : statsData_.shapeTypeCount) {
     auto shapeType = static_cast<CLottieObject::ShapeType>(ps.first);
 
     std::cerr << "Shape: " << CLottieShape::shapeTypeName(shapeType) << " " << ps.second << "\n";
   }
 
-  for (const auto &pe : effectTypeCount_) {
+  for (const auto &pe : statsData_.effectTypeCount) {
     auto effectType = pe.first;
 
     std::cerr << "Effect: " << effectType << " " << pe.second << "\n";
@@ -279,7 +285,7 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
     if (isDebug())
       std::cout << depthStr(obj->hier_depth()) << name << "=" << *value1 << "\n";
 
-    if      (name == "nm") { // name ?
+    if      (name == "nm") { // name
       root_->setName(valueToString(value1));
     }
     else if (name == "ver") { // version number
@@ -330,12 +336,16 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
 
         asset->setParent(root_);
 
-        auto ps = assetIds_.find(asset->id());
+        assert(asset->id());
+
+        auto assetId = asset->id().value();
+
+        auto ps = assetIds_.find(assetId);
 
         if (ps != assetIds_.end())
-          std::cerr << "Duplicate asset id " << asset->id() << "\n";
+          std::cerr << "Duplicate asset id " << assetId << "\n";
 
-        assetIds_[asset->id()] = asset;
+        assetIds_[assetId] = asset;
 
         assets_.push_back(asset);
 
@@ -425,6 +435,8 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
     return errorMsg(msg, "layer is not an object");
 
   auto *layerObj = iValue->cast<CJson::Object>();
+
+  layer->setJsonValue(iValue);
 
   CJson::Object::Names names;
   layerObj->getNames(names);
@@ -535,7 +547,10 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
       todoName(msg1, name, value1);
     }
     else if (name == "sy") { // layer style
-      todoName(msg1, name, value1);
+      auto *styleData = layer->getStyleData();
+
+      if (! readStyleData(msg1, value1, styleData))
+        return false;
     }
     else if (name == "bm") { // blend mode
       layer->setBlendMode(valueToInt(value1));
@@ -768,9 +783,11 @@ addLayerId(CLottieLayer *layer)
 
 bool
 CLottie::
-readMarker(const std::string &msg, const CJson::ValueP &iValue, CLottieMarker *)
+readMarker(const std::string &msg, const CJson::ValueP &iValue, CLottieMarker *marker)
 {
   todoName(msg, "marker", iValue);
+
+  marker->setJsonValue(iValue);
 
   return true;
 }
@@ -789,6 +806,8 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
     return errorMsg(msg, "layer effects is not an array");
 
   auto *efArray = iValue->cast<CJson::Array>();
+
+  effect->setJsonValue(iValue);
 
   for (const auto &efValue : efArray->values()) {
     if (! efValue->isObject())
@@ -830,14 +849,21 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
         effect->setIndex(valueToInt(efValue1));
       }
       else if (efname == "ef") {
-        auto *effect1 = makeEffectValue();
-
-        effect1->parent = effect;
-
-        if (! readEffectValue(msg1, efValue1, effect1))
+        std::vector<CLottieEffectValue *> values;
+        if (! readEffectValues(msg1, efValue1, values))
           return false;
 
-        effect->addValue(effect1);
+        for (auto *value : values) {
+          value->parent = effect;
+
+          effect->addValue(value);
+        }
+      }
+      else if (efname == "np") {
+         effect->setNumProperties(valueToInt(efValue1));
+      }
+      else if (efname == "en") {
+        effect->setEnabled(valueToInt(efValue1));
       }
       else {
         auto etype = effect->type().value_or(0);
@@ -864,13 +890,7 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
           todoName(msg1, efname, efValue1);
         }
         else if (etype == 5) { // custom
-          if      (efname == "np") {
-            effect->setNumProperties(valueToInt(efValue1));
-          }
-          else if (efname == "en") {
-            effect->setEnabled(valueToInt(efValue1));
-          }
-          else if (efname == "v") {
+          if (efname == "v") {
             todoName(msg1, efname, efValue1);
           }
           else
@@ -901,14 +921,7 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
           todoName(msg1, efname, efValue1);
         }
         else if (etype == 25) { // drop shadow
-          if      (efname == "np") {
-            effect->setNumProperties(valueToInt(efValue1));
-          }
-          else if (efname == "en") {
-            effect->setEnabled(valueToInt(efValue1));
-          }
-          else
-            todoName(msg1, efname, efValue1);
+          todoName(msg1, efname, efValue1);
         }
         else if (etype == 26) { // radial wipe
           todoName(msg1, efname, efValue1);
@@ -949,8 +962,8 @@ readEffect(const std::string &msg, const CJson::ValueP &iValue, CLottieEffect *e
 
 bool
 CLottie::
-readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
-                CLottieEffectValue *effectValue) const
+readEffectValues(const std::string &msg, const CJson::ValueP &iValue,
+                 std::vector<CLottieEffectValue *> &effectValues)
 {
   if (! iValue->isArray())
     return errorMsg(msg, "layer effects value is not an array");
@@ -961,11 +974,14 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
     if (! efValue->isObject())
       return errorMsg(msg, "layer effects value array value is not an object");
 
+    auto *effectValue = makeEffectValue();
+
     auto *efObj = efValue->cast<CJson::Object>();
 
     CJson::Object::Names efnames;
     efObj->getNames(efnames);
 
+    // get type
     for (const auto &efname : efnames) {
       if (efname == "ty") {
         CJson::ValueP efValue1;
@@ -985,7 +1001,6 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
 
       if      (efname == "ty") {
         // already done
-        //effectValue->type = valueToInt(efValue1);
       }
       else if (efname == "nm") {
         effectValue->name = valueToString(efValue1);
@@ -999,40 +1014,50 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
       else {
         if      (effectValue->type == 0) { // slider
           if (efname == "v") {
-            if (! readScalarProperty(msg1, efValue1, effectValue->scalar))
+            ScalarProperty scalar;
+            if (! readScalarProperty(msg1, efValue1, scalar))
               return errorMsg(msg1, "readScalarProperty");
+            effectValue->scalar = scalar;
           }
           else
             todoName(msg1, efname, efValue1);
         }
         else if (effectValue->type == 1) { // angle
           if (efname == "v") {
-            if (! readScalarProperty(msg1, efValue1, effectValue->scalar))
+            ScalarProperty scalar;
+            if (! readScalarProperty(msg1, efValue1, scalar))
               return errorMsg(msg1, "readScalarProperty");
+            effectValue->scalar = scalar;
           }
           else
             todoName(msg1, efname, efValue1);
         }
         else if (effectValue->type == 2) { // color
           if (efname == "v") {
-            if (! readColorProperty(msg1, efValue1, effectValue->color))
+            ColorProperty color;
+            if (! readColorProperty(msg1, efValue1, color))
               return errorMsg(msg1, "readColorProperty");
+            effectValue->color = color;
           }
           else
             todoName(msg1, efname, efValue1);
         }
         else if (effectValue->type == 3) { // point
           if (efname == "v") {
-            if (! readVectorProperty(msg1, efValue1, effectValue->point))
+            VectorProperty point;
+            if (! readVectorProperty(msg1, efValue1, point))
               (void) errorMsg(msg1, "readVectorProperty");
+            effectValue->point = point;
           }
           else
             todoName(msg1, efname, efValue1);
         }
         else if (effectValue->type == 4) { // checkbox
           if (efname == "v") {
-            if (! readVectorProperty(msg1, efValue1, effectValue->point))
+            VectorProperty point;
+            if (! readVectorProperty(msg1, efValue1, point))
               (void) errorMsg(msg1, "readVectorProperty");
+            effectValue->point = point;
           }
           else
             todoName(msg1, efname, efValue1);
@@ -1046,16 +1071,20 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
         }
         else if (effectValue->type == 7) { // drop down
           if (efname == "v") {
-            if (! readScalarProperty(msg1, efValue1, effectValue->scalar))
+            ScalarProperty scalar;
+            if (! readScalarProperty(msg1, efValue1, scalar))
               return errorMsg(msg1, "readScalarProperty");
+            effectValue->scalar = scalar;
           }
           else
             todoName(msg1, efname, efValue1);
         }
         else if (effectValue->type == 10) { // layer
           if (efname == "v") {
-            if (! readScalarProperty(msg1, efValue1, effectValue->scalar))
+            ScalarProperty scalar;
+            if (! readScalarProperty(msg1, efValue1, scalar))
               return errorMsg(msg1, "readScalarProperty");
+            effectValue->scalar = scalar;
           }
           else
             todoName(msg1, efname, efValue1);
@@ -1063,6 +1092,76 @@ readEffectValue(const std::string &msg, const CJson::ValueP &iValue,
         else {
           todoName(msg1, efname, efValue1);
         }
+      }
+    }
+
+    effectValues.push_back(effectValue);
+  }
+
+  return true;
+}
+
+bool
+CLottie::
+readStyleData(const std::string &msg, const CJson::ValueP &iValue, StyleData *styleData)
+{
+  if (! iValue->isArray())
+    return errorMsg(msg, "style is not an array");
+
+  auto *array = iValue->cast<CJson::Array>();
+
+  for (const auto &value : array->values()) {
+    if (! value->isObject())
+      return errorMsg(msg, "shape array element is not an object");
+
+    auto *obj = value->cast<CJson::Object>();
+
+    CJson::Object::Names names;
+    obj->getNames(names);
+
+    // get type first
+    for (const auto &name : names) {
+      if (name != "ty")
+        continue;
+
+      CJson::ValueP value1;
+      obj->getNamedValue(name, value1);
+
+      styleData->type = valueToInt(value1);
+
+      break;
+    }
+
+    auto type = styleData->type.value_or(-1);
+
+    // process type specific values
+    for (const auto &name : names) {
+      auto msg1 = msg + "/" + name;
+
+      CJson::ValueP value1;
+      obj->getNamedValue(name, value1);
+
+      if      (name == "ty") {
+        // already done
+      }
+      else if (name == "nm") {
+        styleData->name = valueToString(value1);
+      }
+      else {
+        if (type == 0) { // stroke style
+          if      (name == "c") {
+            if (! readColorProperty(msg1, value1, styleData->color))
+              return errorMsg(msg1, "readColorProperty");
+          }
+          else if (name == "s") {
+            if (! readScalarProperty(msg1, value1, styleData->size))
+              return errorMsg(msg1, "readScalarProperty");
+          }
+          else
+            unhandledName(name, value1);
+        }
+        else
+          unhandledName(name, value1);
       }
     }
   }
@@ -1078,6 +1177,8 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
     return errorMsg(msg, "shape is not an object");
 
   auto *shapeObj = iValue->cast<CJson::Object>();
+
+  shape->setJsonValue(iValue);
 
   CJson::Object::Names names;
   shapeObj->getNames(names);
@@ -1623,6 +1724,13 @@ readShape(const std::string &msg, const CJson::ValueP &iValue, CLottieShape *sha
           if (! readDash(msg1, value1, gradientStroke->dash))
             return errorMsg(msg1, "readDash");
         }
+        else if (name == "c") { // color
+          if (! readColorProperty(msg1, value1, gradientStroke->color))
+            return errorMsg(msg1, "readColorProperty");
+        }
+        else if (name == "r") { // fill rule
+          gradientStroke->fillRule = valueToInt(value1);
+        }
         else
           unhandledName(name, value1);
       }
@@ -1952,6 +2060,8 @@ readAsset(const std::string &msg, const CJson::ValueP &iValue, CLottieAsset *ass
 
   auto *assetObj = iValue->cast<CJson::Object>();
 
+  asset->setJsonValue(iValue);
+
   CJson::Object::Names names;
   assetObj->getNames(names);
 
@@ -1964,7 +2074,10 @@ readAsset(const std::string &msg, const CJson::ValueP &iValue, CLottieAsset *ass
     if (isDebug())
       std::cout << depthStr(assetObj->hier_depth()) << name << "=" << *value1 << "\n";
 
-    if      (name == "id") { // id
+    if      (name == "nm") { // name
+      asset->setName(valueToString(value1));
+    }
+    else if (name == "id") { // id
       asset->setId(valueToString(value1));
     }
     else if (name == "w") { // width
@@ -2026,13 +2139,13 @@ readAsset(const std::string &msg, const CJson::ValueP &iValue, CLottieAsset *ass
 
 bool
 CLottie::
-readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
+readSplitPositionProperty(const std::string &msg, const CJson::ValueP &iValue,
                           SplitPositionProperty &position) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "split position is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -2050,7 +2163,7 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
       position.setAnimated(valueToBool(value2));
     }
     else if (name1 == "s") {
-      position.split = valueToBool(value2);
+      position.setSplit(valueToBool(value2));
     }
     else if (name1 == "k") {
       if (! value2->isArray())
@@ -2145,7 +2258,9 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
     }
     else if (name1 == "x") {
       if (value2->isString()) { // expression
-        warnValueMsg(msg1, "x is expression", value2);
+        //warnValueMsg(msg1, "x is expression", value2);
+
+        position.x.setExpression(value2->toString());
       }
       else {
         if (! readScalarProperty(msg1, value2, position.x))
@@ -2171,13 +2286,13 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
 bool
 CLottie::
-readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
+readVectorProperty(const std::string &msg, const CJson::ValueP &iValue,
                    VectorProperty &vector) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "vector is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -2295,6 +2410,9 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
     else if (name1 == "l") {
       vector.length = valueToInt(value2);
     }
+    else if (name1 == "x") {
+      vector.setExpression(valueToString(value2));
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2304,13 +2422,13 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
 bool
 CLottie::
-readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
+readPositionProperty(const std::string &msg, const CJson::ValueP &iValue,
                      PositionProperty &position) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "position is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -2435,12 +2553,12 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
 
 bool
 CLottie::
-readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProperty &size) const
+readSizeProperty(const std::string &msg, const CJson::ValueP &iValue, SizeProperty &size) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "size is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -2553,6 +2671,9 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
     else if (name1 == "ix") {
       size.setIndex(valueToInt(value2));
     }
+    else if (name1 == "x") {
+      size.setExpression(valueToString(value2));
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2562,12 +2683,12 @@ readSizeProperty(const std::string &msg, const CJson::ValueP &ivalue, SizeProper
 
 bool
 CLottie::
-readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProperty &color) const
+readColorProperty(const std::string &msg, const CJson::ValueP &iValue, ColorProperty &color) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "color is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -2622,34 +2743,18 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
                 keyFrame->setOValues(ovalues);
             }
             else if (name2 == "s") { // start value
-#if 0
-              std::vector<double> numbers;
-              if (! readNumbers(msg2, value3, numbers))
-                return errorMsg(msg2, "readNumbers");
-              for (const auto &n : numbers)
-                keyFrame->startValue.vals.push_back(CRGBA(n, n, n)); // TODO
-#else
               OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
               if (c)
                 keyFrame->startValue.vals.push_back(c.value());
-#endif
             }
             else if (name2 == "e") { // end value
-#if 0
-              std::vector<double> numbers;
-              if (! readNumbers(msg2, value3, numbers))
-                return errorMsg(msg2, "readNumbers");
-              for (const auto &n : numbers)
-                keyFrame->startValue.vals.push_back(CRGBA(n, n, n)); // TODO
-#else
               OptColor c;
               if (! readColor(msg2, value3, c))
                 return errorMsg(msg2, "readColor");
               if (c)
                 keyFrame->endValue.vals.push_back(c.value());
-#endif
             }
             else if (name2 == "n") { // interpolation key
               CLottieKeyFrame::Interpolations interpolation;
@@ -2694,6 +2799,9 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
     else if (name1 == "ix") {
       color.setIndex(valueToInt(value2));
     }
+    else if (name1 == "x") {
+      color.setExpression(valueToString(value2));
+    }
     else
       unhandledName(name1, value2);
   }
@@ -2703,13 +2811,13 @@ readColorProperty(const std::string &msg, const CJson::ValueP &ivalue, ColorProp
 
 bool
 CLottie::
-readBezierProperty(const std::string &msg, const CJson::ValueP &ivalue,
+readBezierProperty(const std::string &msg, const CJson::ValueP &iValue,
                    BezierProperty &bezier) const
 {
-  if (! ivalue->isObject())
+  if (! iValue->isObject())
     return errorMsg(msg, "position is object");
 
-  auto *sObj = ivalue->cast<CJson::Object>();
+  auto *sObj = iValue->cast<CJson::Object>();
 
   CJson::Object::Names names;
   sObj->getNames(names);
@@ -3304,6 +3412,8 @@ readDash(const std::string &msg, const CJson::ValueP &iValue, Dash &dash) const
   auto *dArray = iValue->cast<CJson::Array>();
 
   for (const auto &dvalue : dArray->values()) {
+    DashData dashData;
+
     if (! dvalue->isObject())
       return errorMsg(msg, "dash array value is not an object");
 
@@ -3319,19 +3429,34 @@ readDash(const std::string &msg, const CJson::ValueP &iValue, Dash &dash) const
       dobj->getNamedValue(dname, dvalue1);
 
       if      (dname == "n") { // dash type
-        dash.type = valueToString(dvalue1);
+        dashData.type = valueToString(dvalue1);
       }
       else if (dname == "nm") {
-        dash.name = valueToString(dvalue1);
+        dashData.name = valueToString(dvalue1);
       }
       else if (dname == "v") { // length
-        if (! readScalarProperty(msg2, dvalue1, dash.value))
+        if (! readScalarProperty(msg2, dvalue1, dashData.value))
           return errorMsg(msg2, "readScalarProperty");
       }
       else
         unhandledName(dname, dvalue1);
     }
+
+    dash.data[dashData.type.value_or("")].push_back(dashData);
   }
+
+  auto setScalar = [&](const std::string &name, std::vector<ScalarProperty> &scalar) {
+    auto p = dash.data.find(name);
+
+    if (p != dash.data.end()) {
+      for (const auto &d1 : (*p).second)
+        scalar.push_back(d1.value);
+    }
+  };
+
+  setScalar("o", dash.offset);
+  setScalar("d", dash.dash  );
+  setScalar("g", dash.gap   );
 
   return true;
 }
@@ -3931,9 +4056,7 @@ printI(const std::string &prefix, bool hier) const
 
   //---
 
-  printValue(prefix, "id", id_);
-
-  optPrintValue(prefix, "css", css_);
+  optPrintValue(prefix, "id", id_);
 
   optPrintValue(prefix, "width" , width_);
   optPrintValue(prefix, "height", height_);
@@ -3976,6 +4099,7 @@ CLottieLayer::
 
   delete mask_;
   delete effect_;
+  delete styleData_;
   delete solid_;
   delete precomp_;
 }
@@ -4003,6 +4127,16 @@ getEffect()
   }
 
   return effect_;
+}
+
+CLottie::StyleData *
+CLottieLayer::
+getStyleData()
+{
+  if (! styleData_)
+    styleData_ = new StyleData;
+
+  return styleData_;
 }
 
 CMatrixStack2D
@@ -4068,28 +4202,28 @@ CLottieShape *
 CLottieLayer::
 getFillShape() const
 {
-  return getShapeOfType(ShapeType::FILL);
+  return getShapeOfType(ShapeType::FILL, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieLayer::
 getStrokeShape() const
 {
-  return getShapeOfType(ShapeType::STROKE);
+  return getShapeOfType(ShapeType::STROKE, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieLayer::
 getGradientFillShape() const
 {
-  return getShapeOfType(ShapeType::GRADIENT_FILL);
+  return getShapeOfType(ShapeType::GRADIENT_FILL, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieLayer::
 getGradientStrokeShape() const
 {
-  return getShapeOfType(ShapeType::GRADIENT_STROKE);
+  return getShapeOfType(ShapeType::GRADIENT_STROKE, /*hidden*/true);
 }
 
 CLottieShape *
@@ -4175,7 +4309,6 @@ printI(const std::string &prefix, bool hier) const
   //---
 
   optPrintValue(prefix, "matchName", matchName_);
-  optPrintValue(prefix, "css"      , css_);
 
   optPrintValue(prefix, "three_d"   , threeD_);
   optPrintValue(prefix, "autoOrient", autoOrient_);
@@ -4334,8 +4467,8 @@ printI(const std::string &prefix, bool hier) const
   optPrintValue(prefix, "numProperties", numProperties_);
   optPrintValue(prefix, "enabled"      , enabled_);
 
-  for (auto *c : children_)
-    c->print(prefix);
+  for (auto *v : values())
+    v->print(prefix + "  ");
 }
 
 //---
@@ -4560,28 +4693,28 @@ CLottieShape *
 CLottieShape::
 getFillShape() const
 {
-  return getShapeOfType(ShapeType::FILL);
+  return getShapeOfType(ShapeType::FILL, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieShape::
 getStrokeShape() const
 {
-  return getShapeOfType(ShapeType::STROKE);
+  return getShapeOfType(ShapeType::STROKE, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieShape::
 getGradientFillShape() const
 {
-  return getShapeOfType(ShapeType::GRADIENT_FILL);
+  return getShapeOfType(ShapeType::GRADIENT_FILL, /*hidden*/true);
 }
 
 CLottieShape *
 CLottieShape::
 getGradientStrokeShape() const
 {
-  return getShapeOfType(ShapeType::GRADIENT_STROKE);
+  return getShapeOfType(ShapeType::GRADIENT_STROKE, /*hidden*/true);
 }
 
 CLottieShape *
@@ -4802,6 +4935,8 @@ printI(const std::string &prefix, bool /*hier*/) const
   optPrintValue(prefix, "hidden", isHidden());
 
   optPrintValue(prefix, "ind", ind_);
+
+  optPrintValue(prefix, "css", css_);
 }
 
 //---
@@ -4821,9 +4956,16 @@ print(const std::string &prefix) const
 
   optPrintValue(prefix1, "ivalue", ivalue);
 
-  printProperty(prefix1, "scalar", scalar);
-  printProperty(prefix1, "color" , color);
-  printProperty(prefix1, "point" , point);
+  if (scalar)
+    printProperty(prefix1, "scalar", *scalar);
+
+  if (color)
+    printProperty(prefix1, "color", *color);
+
+  if (point)
+    printProperty(prefix1, "point", *point);
+
+  optPrintValue(prefix1, "number", number);
 }
 
 //---
@@ -4976,10 +5118,13 @@ print(const std::string &prefix) const
   optPrintValue(prefix1, "lineJoin"      , lineJoin);
   optPrintValue(prefix1, "miterLimit"    , miterLimit);
   printProperty(prefix1, "miterLimitAnim", miterLimitAnim);
-  optPrintValue(prefix1, "dashType"      , dash.type);
-  optPrintValue(prefix1, "dashName"      , dash.name);
-  printProperty(prefix1, "dashValue"     , dash.value);
   optPrintValue(prefix1, "blendMode"     , blendMode);
+
+  for (const auto &d : dash.data) {
+    for (const auto &d1 : d.second) {
+      printProperty(prefix1, "dash." + d.first, d1.value);
+    }
+  }
 }
 
 void

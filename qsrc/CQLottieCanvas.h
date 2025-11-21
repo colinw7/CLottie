@@ -11,7 +11,17 @@ class CQLottieCanvas : public QWidget {
  public:
   CQLottieCanvas(CQLottie *lottie);
 
+  bool isCheckerBoard() const { return checkerBoard_; }
+  void setCheckerBoard(bool b) { checkerBoard_ = b; }
+
+  double checkerBoardSize() const { return checkerBoardSize_; }
+  void setCheckerBoardSize(double r) { checkerBoardSize_ = r; }
+
+  //---
+
   void invalidate();
+
+  //---
 
   void resizeEvent(QResizeEvent *) override;
 
@@ -24,13 +34,18 @@ class CQLottieCanvas : public QWidget {
 
   QSize sizeHint() const override { return QSize(1600, 1600); }
 
+ private:
+  void drawCheckerboard(QPainter *painter, int cs) const;
+
  private Q_SLOTS:
   void customContextMenuSlot(const QPoint &);
 
  private:
   CQLottie* lottie_ { nullptr };
 
-  bool needsUpdate_ { true };
+  bool   checkerBoard_     { false };
+  double checkerBoardSize_ { 48 };
+  bool   needsUpdate_      { true };
 };
 
 #endif

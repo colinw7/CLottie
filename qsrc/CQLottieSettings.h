@@ -6,6 +6,7 @@
 class CQLottie;
 
 class CQColorEdit;
+class CQRealSpin;
 class QCheckBox;
 
 class CQLottieSettings : public QFrame {
@@ -21,6 +22,8 @@ class CQLottieSettings : public QFrame {
  private Q_SLOTS:
   void equalScaleSlot(int);
   void bgFillSlot(const QColor &);
+  void showCheckerBoardSlot(int);
+  void checkerBoardSizeSlot(double);
   void showSelectSlot(int);
   void selectedFillSlot(const QColor &);
   void selectedStrokeSlot(const QColor &);
@@ -30,13 +33,15 @@ class CQLottieSettings : public QFrame {
  private:
   CQLottie *lottie_ { nullptr };
 
-  QCheckBox*   equalScale_       { nullptr };
-  CQColorEdit* bgFillEdit_       { nullptr };
-  QCheckBox*   showSelect_       { nullptr };
-  CQColorEdit* selectFillEdit_   { nullptr };
-  CQColorEdit* selectStrokeEdit_ { nullptr };
-  QCheckBox*   showBBox_         { nullptr };
-  CQColorEdit* bboxStrokeEdit_   { nullptr };
+  QCheckBox*   equalScale_        { nullptr };
+  CQColorEdit* bgFillEdit_        { nullptr };
+  QCheckBox*   checkerBoardCheck_ { nullptr };
+  CQRealSpin*  checkerBoardSize_  { nullptr };
+  QCheckBox*   showSelect_        { nullptr };
+  CQColorEdit* selectFillEdit_    { nullptr };
+  CQColorEdit* selectStrokeEdit_  { nullptr };
+  QCheckBox*   showBBox_          { nullptr };
+  CQColorEdit* bboxStrokeEdit_    { nullptr };
 };
 
 #endif

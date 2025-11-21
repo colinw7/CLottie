@@ -5,7 +5,9 @@
 #include <CQLottieImage.h>
 
 #include <CQMatrixStack2D.h>
+#include <CQDragSpin.h>
 #include <CQRealSpin.h>
+#include <CQIntegerSpin.h>
 #include <CQColorChooser.h>
 
 #include <QPushButton>
@@ -40,11 +42,41 @@ void showMatrixStack(const CMatrixStack2D &m) {
   s_matrixStack->raise();
 }
 
-void showImage(const QImage &image) {
+void showImage(const QString &title, const QImage &image) {
   static CQLottieImage *s_imageView;
 
   if (! s_imageView)
     s_imageView = new CQLottieImage;
+
+  s_imageView->setWindowTitle(title);
+
+  s_imageView->setImage(image);
+
+  s_imageView->show();
+  s_imageView->raise();
+}
+
+void showMatteImage(const QString &title, const QImage &image) {
+  static CQLottieImage *s_imageView;
+
+  if (! s_imageView)
+    s_imageView = new CQLottieImage;
+
+  s_imageView->setWindowTitle(title);
+
+  s_imageView->setImage(image);
+
+  s_imageView->show();
+  s_imageView->raise();
+}
+
+void showEffectImage(const QString &title, const QImage &image) {
+  static CQLottieImage *s_imageView;
+
+  if (! s_imageView)
+    s_imageView = new CQLottieImage;
+
+  s_imageView->setWindowTitle(title);
 
   s_imageView->setImage(image);
 
@@ -93,10 +125,15 @@ CQLottieTree(CQLottie *lottie) :
 
   //---
 
-  auto *controlFrame  = new QFrame;
-  auto *controlLayout = new QHBoxLayout(controlFrame);
+  auto *controlFrame1  = new QFrame;
+  auto *controlLayout1 = new QHBoxLayout(controlFrame1);
 
-  layout->addWidget(controlFrame);
+  layout->addWidget(controlFrame1);
+
+  auto *controlFrame2  = new QFrame;
+  auto *controlLayout2 = new QHBoxLayout(controlFrame2);
+
+  layout->addWidget(controlFrame2);
 
   auto *bboxButton          = new QPushButton("BBox");
   auto *transformButton     = new QPushButton("Transform");
@@ -104,6 +141,7 @@ CQLottieTree(CQLottie *lottie) :
   auto *zoomButton          = new QPushButton("Zoom");
   auto *imageButton         = new QPushButton("Image");
   auto *printButton         = new QPushButton("Print");
+  auto *printJsonButton     = new QPushButton("Print Json");
 
   connect(bboxButton, SIGNAL(clicked()), this, SLOT(bboxSlot()));
   connect(transformButton, SIGNAL(clicked()), this, SLOT(transformSlot()));
@@ -111,14 +149,18 @@ CQLottieTree(CQLottie *lottie) :
   connect(zoomButton, SIGNAL(clicked()), this, SLOT(zoomSlot()));
   connect(imageButton, SIGNAL(clicked()), this, SLOT(imageSlot()));
   connect(printButton, SIGNAL(clicked()), this, SLOT(printSlot()));
+  connect(printJsonButton, SIGNAL(clicked()), this, SLOT(printJsonSlot()));
 
-  controlLayout->addStretch(1);
-  controlLayout->addWidget(bboxButton);
-  controlLayout->addWidget(transformButton);
-  controlLayout->addWidget(hierTransformButton);
-  controlLayout->addWidget(zoomButton);
-  controlLayout->addWidget(imageButton);
-  controlLayout->addWidget(printButton);
+  controlLayout1->addStretch(1);
+  controlLayout1->addWidget(zoomButton);
+  controlLayout1->addWidget(imageButton);
+
+  controlLayout2->addStretch(1);
+  controlLayout2->addWidget(bboxButton);
+  controlLayout2->addWidget(transformButton);
+  controlLayout2->addWidget(hierTransformButton);
+  controlLayout2->addWidget(printButton);
+  controlLayout2->addWidget(printJsonButton);
 
   //---
 
@@ -524,111 +566,134 @@ void
 CQLottieTree::
 imageSlot()
 {
+  QImage image, matteImage, effectImage;
+
   auto selectedItems = tree_->selectedItems();
 
   for (auto *item : selectedItems) {
     auto *layerItem = dynamic_cast<CQLottieTreeLayerItem *>(item);
-    if (! layerItem) continue;
+    auto *assetItem = dynamic_cast<CQLottieTreeAssetItem *>(item);
 
-    auto *qlayer = dynamic_cast<CQLottieLayer *>(layerItem->layer());
-    if (! qlayer) continue;
+    if     (layerItem) {
+      auto *qlayer = dynamic_cast<CQLottieLayer *>(layerItem->layer());
+      if (! qlayer) continue;
 
-    QImage image;
+      if (! qlayer->image().isNull())
+        image = qlayer->image();
+      else {
+        auto typeId = qlayer->typeId().value_or(-1);
 
-    if (! qlayer->image().isNull())
-      image = qlayer->image();
-    else {
-      auto typeId = qlayer->typeId().value_or(-1);
+        if (typeId == 2) { // Image Layer
+          auto *asset = lottie_->getLayerAsset(qlayer);
+          if (! asset) continue;
 
-      if (typeId == 2) { // Image Layer
-        auto *asset = lottie_->getLayerAsset(qlayer);
-        if (! asset) continue;
-
-        image = lottie_->getAssetImage(asset);
+          image = lottie_->getAssetImage(asset);
+        }
       }
-    }
 
-    if (! image.isNull())
-      showImage(image);
+      if (! qlayer->matteImage().isNull())
+        matteImage = qlayer->matteImage();
+
+      if (! qlayer->effectImage().isNull())
+        effectImage = qlayer->effectImage();
+    }
+    else if (assetItem) {
+      auto *asset = assetItem->asset();
+      if (! asset) continue;
+
+      image = lottie_->getAssetImage(asset, /*create*/false);
+    }
   }
+
+  if (! image.isNull())
+    showImage("Image", image);
+
+  if (! matteImage.isNull())
+    showMatteImage("Matte Image", matteImage);
+
+  if (! effectImage.isNull())
+    showEffectImage("Effect Image", effectImage);
 }
 
 void
 CQLottieTree::
 printSlot()
 {
-  auto selectedItems = tree_->selectedItems();
+  auto *obj = getSelectedObject();
+  if (! obj) return;
 
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
+  obj->print();
 
-    auto *obj = objectItem->object();
+}
 
-    obj->print();
-  }
+void
+CQLottieTree::
+printJsonSlot()
+{
+  auto *obj = getSelectedObject();
+  if (! obj) return;
+
+  std::cerr << "Json:" << obj->jsonValue()->to_string() << "\n";
 }
 
 void
 CQLottieTree::
 bboxSlot()
 {
-  auto selectedItems = tree_->selectedItems();
+  auto *obj = getSelectedObject();
+  if (! obj) return;
 
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
-
-    auto *obj = objectItem->object();
-
-    std::cerr << obj->bbox() << "\n";
-  }
+  std::cerr << obj->bbox() << "\n";
 }
 
 void
 CQLottieTree::
 transformSlot()
 {
+  auto *obj = getSelectedObject();
+  if (! obj) return;
+
   CLottieUtil::TimeFrame timeFrame;
   lottie_->getTimeFrame(timeFrame);
 
-  auto selectedItems = tree_->selectedItems();
+  auto m = obj->calcTransform(timeFrame);
 
-  for (auto *item : selectedItems) {
-    auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
-    if (! objectItem) continue;
+  std::cerr << m << "\n";
 
-    auto *obj = objectItem->object();
-
-    auto m = obj->calcTransform(timeFrame);
-
-    std::cerr << m << "\n";
-
-    showMatrixStack(m);
-  }
+  showMatrixStack(m);
 }
 
 void
 CQLottieTree::
 hierTransformSlot()
 {
+  auto *obj = getSelectedObject();
+  if (! obj) return;
+
   CLottieUtil::TimeFrame timeFrame;
   lottie_->getTimeFrame(timeFrame);
 
+  auto m = obj->calcHierTransform(timeFrame);
+
+  std::cerr << m << "\n";
+
+  showMatrixStack(m);
+}
+
+CLottieObject *
+CQLottieTree::
+getSelectedObject() const
+{
   auto selectedItems = tree_->selectedItems();
 
   for (auto *item : selectedItems) {
     auto *objectItem = dynamic_cast<CQLottieTreeObjectItem *>(item);
     if (! objectItem) continue;
 
-    auto *obj = objectItem->object();
-
-    auto m = obj->calcHierTransform(timeFrame);
-
-    std::cerr << m << "\n";
-
-    showMatrixStack(m);
+    return objectItem->object();
   }
+
+  return nullptr;
 }
 
 QTreeWidgetItem *
@@ -722,7 +787,8 @@ QString objectLabelStr(CLottieObject *object) {
   if (objName == "" && object->objectType() == CLottieObject::Type::ASSET) {
     auto *asset = dynamic_cast<CLottieAsset *>(object);
 
-    objName = QString::fromStdString(asset->id());
+    if (asset->id())
+      objName = QString::fromStdString(asset->id().value());
   }
 
   QString indStr;
@@ -795,7 +861,7 @@ CQLottieObjectTree(CQLottie *lottie) :
 
   tree_->setColumnCount(3);
 
-  tree_->setHeaderLabels(QStringList() << "Name" << "Value" << "Animated");
+  tree_->setHeaderLabels(QStringList() << "Name" << "Value" << "Anim");
 
   //--
 
@@ -934,7 +1000,8 @@ load()
     { "type"  , CQLottieTreeValueItem::Type::STRING  },
 //  { "typeId", CQLottieTreeValueItem::Type::INTEGER },
     { "hidden", CQLottieTreeValueItem::Type::BOOL    },
-    { "ind"   , CQLottieTreeValueItem::Type::INTEGER }
+    { "ind"   , CQLottieTreeValueItem::Type::INTEGER },
+    { "css"   , CQLottieTreeValueItem::Type::STRING  },
   };
 
   if      (root) {
@@ -960,6 +1027,8 @@ load()
         continue;
       if (propName.name == "ind" && ! object_->ind())
         continue;
+      if (propName.name == "css" && ! object_->css())
+        continue;
 
       addRootProp(propName);
     }
@@ -974,7 +1043,6 @@ load()
   else if (asset) {
     std::vector<PropName> propNames = {
       { "id"      , CQLottieTreeValueItem::Type::STRING },
-      { "css"     , CQLottieTreeValueItem::Type::STRING },
       { "width"   , CQLottieTreeValueItem::Type::REAL   },
       { "height"  , CQLottieTreeValueItem::Type::REAL   },
       { "dir"     , CQLottieTreeValueItem::Type::STRING },
@@ -993,6 +1061,8 @@ load()
       if (propName.name == "type" && ! object_->type())
         continue;
       if (propName.name == "ind" && ! object_->ind())
+        continue;
+      if (propName.name == "css" && ! object_->css())
         continue;
 
       addAssetProp(propName);
@@ -1029,6 +1099,7 @@ load()
       { "blendMode"  , CQLottieTreeValueItem::Type::INTEGER },
       { "width"      , CQLottieTreeValueItem::Type::INTEGER },
       { "height"     , CQLottieTreeValueItem::Type::INTEGER },
+      { "threeD"     , CQLottieTreeValueItem::Type::BOOL    },
       { "frameIn"    , CQLottieTreeValueItem::Type::REAL    },
       { "frameOut"   , CQLottieTreeValueItem::Type::REAL    },
       { "startTime"  , CQLottieTreeValueItem::Type::REAL    },
@@ -1059,6 +1130,8 @@ load()
         continue;
       if (propName.name == "ind" && ! object_->ind())
         continue;
+      if (propName.name == "css" && ! object_->css())
+        continue;
 
       addLayerProp(propName);
     }
@@ -1077,6 +1150,10 @@ load()
         continue;
       if (propName.name == "parentInd" && ! layer->parentInd())
         continue;
+      if (propName.name == "autoOrient" && ! layer->autoOrient())
+        continue;
+      if (propName.name == "blendMode" && ! layer->blendMode())
+        continue;
       if (propName.name == "matteMode" && ! layer->matteMode())
         continue;
       if (propName.name == "matteParent" && ! layer->matteParent())
@@ -1088,6 +1165,8 @@ load()
       if (propName.name == "height" && ! layer->height())
         continue;
       if (propName.name == "startTime" && ! layer->startTime())
+        continue;
+      if (propName.name == "timeStretch" && ! layer->timeStretch())
         continue;
 
       addLayerProp(propName);
@@ -1139,10 +1218,14 @@ load()
       };
 
       for (const auto &propName : maskPropNames) {
+        if (propName.name == "mask.name" && ! layer->mask()->name)
+          continue;
+
         addLayerProp(propName);
       }
     }
 
+#if 0
     if (layer->effect()) {
       std::vector<PropName> effectPropNames = {
         { "effect.type"         , CQLottieTreeValueItem::Type::INTEGER },
@@ -1161,6 +1244,7 @@ load()
         addLayerProp(propName);
       }
     }
+#endif
 
     if (layer->solid()) {
       std::vector<PropName> solidPropNames = {
@@ -1218,6 +1302,8 @@ load()
       if (propName.name == "type" && ! object_->type())
         continue;
       if (propName.name == "ind" && ! object_->ind())
+        continue;
+      if (propName.name == "css" && ! object_->css())
         continue;
 
       addShapeProp(propName);
@@ -1326,9 +1412,9 @@ load()
         { "stroke.lineJoin"      , CQLottieTreeValueItem::Type::INTEGER },
         { "stroke.miterLimit"    , CQLottieTreeValueItem::Type::REAL    },
         { "stroke.miterLimitAnim", CQLottieTreeValueItem::Type::SCALAR  },
-        { "stroke.dash.type"     , CQLottieTreeValueItem::Type::STRING  },
-        { "stroke.dash.name"     , CQLottieTreeValueItem::Type::STRING  },
-        { "stroke.dash.value"    , CQLottieTreeValueItem::Type::SCALAR  },
+        { "stroke.dash.offset"   , CQLottieTreeValueItem::Type::SCALAR  },
+        { "stroke.dash.dash"     , CQLottieTreeValueItem::Type::SCALAR  },
+        { "stroke.dash.gap"      , CQLottieTreeValueItem::Type::SCALAR  },
         { "stroke.blendMode"     , CQLottieTreeValueItem::Type::INTEGER }
       };
 
@@ -1337,11 +1423,11 @@ load()
           continue;
         if (propName.name == "stroke.miterLimitAnim" && ! shape->stroke()->miterLimitAnim.isSet())
           continue;
-        if (propName.name == "stroke.dash.type" && ! shape->stroke()->dash.type)
+        if (propName.name == "stroke.dash.offset" && shape->stroke()->dash.offset.empty())
           continue;
-        if (propName.name == "stroke.dash.name" && ! shape->stroke()->dash.name)
+        if (propName.name == "stroke.dash.dash" && shape->stroke()->dash.dash.empty())
           continue;
-        if (propName.name == "stroke.dash.value" && ! shape->stroke()->dash.value.isSet())
+        if (propName.name == "stroke.dash.gap" && shape->stroke()->dash.gap.empty())
           continue;
         if (propName.name == "stroke.blendMode" && ! shape->stroke()->blendMode)
           continue;
@@ -1381,6 +1467,8 @@ load()
         if (propName.name == "group.color" && ! shape->group()->color.isSet())
           continue;
         if (propName.name == "group.opacity" && ! shape->group()->opacity.isSet())
+          continue;
+        if (propName.name == "group.numProperties" && ! shape->group()->numProperties)
           continue;
         if (propName.name == "group.blendMode" && ! shape->group()->blendMode)
           continue;
@@ -1425,20 +1513,20 @@ load()
 
     if (shape->gradientStroke()) {
       std::vector<PropName> strokePropNames = {
-        { "gradientStroke.opacity"   , CQLottieTreeValueItem::Type::SCALAR  },
-        { "gradientStroke.type"      , CQLottieTreeValueItem::Type::INTEGER },
-        { "gradientStroke.stopCount" , CQLottieTreeValueItem::Type::INTEGER },
-        { "gradientStroke.index"     , CQLottieTreeValueItem::Type::INTEGER },
-        { "gradientStroke.startPoint", CQLottieTreeValueItem::Type::VECTOR  },
-        { "gradientStroke.endPoint"  , CQLottieTreeValueItem::Type::VECTOR  },
-        { "gradientStroke.width"     , CQLottieTreeValueItem::Type::SCALAR  },
-        { "gradientStroke.lineCap"   , CQLottieTreeValueItem::Type::INTEGER },
-        { "gradientStroke.lineJoin"  , CQLottieTreeValueItem::Type::INTEGER },
-        { "gradientStroke.miterLimit", CQLottieTreeValueItem::Type::REAL    },
-        { "gradientStroke.dash.type" , CQLottieTreeValueItem::Type::STRING  },
-        { "gradientStroke.dash.name" , CQLottieTreeValueItem::Type::STRING  },
-        { "gradientStroke.dash.value", CQLottieTreeValueItem::Type::SCALAR  },
-        { "gradientStroke.colors"    , CQLottieTreeValueItem::Type::ARRAY   }
+        { "gradientStroke.opacity"    , CQLottieTreeValueItem::Type::SCALAR  },
+        { "gradientStroke.type"       , CQLottieTreeValueItem::Type::INTEGER },
+        { "gradientStroke.stopCount"  , CQLottieTreeValueItem::Type::INTEGER },
+        { "gradientStroke.index"      , CQLottieTreeValueItem::Type::INTEGER },
+        { "gradientStroke.startPoint" , CQLottieTreeValueItem::Type::VECTOR  },
+        { "gradientStroke.endPoint"   , CQLottieTreeValueItem::Type::VECTOR  },
+        { "gradientStroke.width"      , CQLottieTreeValueItem::Type::SCALAR  },
+        { "gradientStroke.lineCap"    , CQLottieTreeValueItem::Type::INTEGER },
+        { "gradientStroke.lineJoin"   , CQLottieTreeValueItem::Type::INTEGER },
+        { "gradientStroke.miterLimit" , CQLottieTreeValueItem::Type::REAL    },
+        { "gradientStroke.dash.offset", CQLottieTreeValueItem::Type::SCALAR  },
+        { "gradientStroke.dash.dash"  , CQLottieTreeValueItem::Type::SCALAR  },
+        { "gradientStroke.dash.gap"   , CQLottieTreeValueItem::Type::SCALAR  },
+        { "gradientStroke.colors"     , CQLottieTreeValueItem::Type::ARRAY   }
       };
 
       for (const auto &propName : strokePropNames) {
@@ -1452,14 +1540,14 @@ load()
         if (propName.name == "gradientStroke.miterLimit" &&
             ! shape->gradientStroke()->miterLimit)
           continue;
-        if (propName.name == "gradientStroke.dash.type" &&
-            ! shape->gradientStroke()->dash.type)
+        if (propName.name == "gradientStroke.dash.offset" &&
+            shape->gradientStroke()->dash.offset.empty())
           continue;
-        if (propName.name == "gradientStroke.dash.name" &&
-            ! shape->gradientStroke()->dash.name)
+        if (propName.name == "gradientStroke.dash.dash" &&
+            shape->gradientStroke()->dash.dash.empty())
           continue;
-        if (propName.name == "gradientStroke.dash.value" &&
-            ! shape->gradientStroke()->dash.value.isSet())
+        if (propName.name == "gradientStroke.dash.gap" &&
+            shape->gradientStroke()->dash.gap.empty())
           continue;
 
         addShapeProp(propName);
@@ -1518,7 +1606,11 @@ load()
   }
   else if (effect) {
     std::vector<PropName> propNames = {
-      { "etype", CQLottieTreeValueItem::Type::INTEGER }
+      { "effect.type"         , CQLottieTreeValueItem::Type::INTEGER },
+      { "effect.match"        , CQLottieTreeValueItem::Type::STRING  },
+      { "effect.index"        , CQLottieTreeValueItem::Type::INTEGER },
+      { "effect.numProperties", CQLottieTreeValueItem::Type::INTEGER },
+      { "effect.enabled"      , CQLottieTreeValueItem::Type::INTEGER },
     };
 
     auto addEffectProp = [&](const PropName &propName) {
@@ -1532,6 +1624,8 @@ load()
       if (propName.name == "type" && ! object_->type())
         continue;
       if (propName.name == "ind" && ! object_->ind())
+        continue;
+      if (propName.name == "css" && ! object_->css())
         continue;
 
       addEffectProp(propName);
@@ -1566,22 +1660,31 @@ itemClickedSlot(QTreeWidgetItem *item, int column)
   auto ind = tree_->indexFromItem(item, column);
 
   if (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
-    if (valueItem->propName() == "hidden") {
-      object->setHidden(! object->isHidden().value_or(false));
+    auto *var = object->getVariant(valueItem->propName().toStdString());
 
-      canvas->invalidate();
+    if (var) {
+      auto b = ! var->bvalue();
+
+      auto str = std::string(b ? "1" : "0");
+
+      if (! var->setValue(str))
+        std::cerr << "Failed to set bool\n";
     }
     else {
-      if (layer) {
-        if (valueItem->propName() == "enabled") {
-          auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
-
-          qlayer->setEnabled(! qlayer->isEnabled());
-
-          canvas->invalidate();
+      if (valueItem->propName() == "hidden") {
+        object->setHidden(! object->isHidden().value_or(false));
+      }
+      else {
+        if (layer) {
+          if (valueItem->propName() == "enabled") {
+            auto *qlayer = dynamic_cast<CQLottieLayer *>(layer);
+            qlayer->setEnabled(! qlayer->isEnabled());
+          }
         }
       }
     }
+
+    canvas->invalidate();
   }
 
   tree_->update(ind);
@@ -1742,7 +1845,17 @@ createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &i
     w = check;
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-    auto *edit = new CQRealSpin(parent);
+  //auto *edit = new CQRealSpin(parent);
+    auto *edit = new CQDragRealSpin(parent);
+
+    edit->setAutoFillBackground(true);
+
+    connect(edit, SIGNAL(valueChanged(double)), this, SLOT(updateValue()));
+
+    w = edit;
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
+    auto *edit = new CQIntegerSpin(parent);
 
     edit->setAutoFillBackground(true);
 
@@ -1776,11 +1889,23 @@ createEditor(QWidget *parent, const QStyleOptionViewItem &, const QModelIndex &i
     w = chooser;
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
-    auto *edit = new CQRealSpin(parent);
+  //auto *edit = new CQRealSpin(parent);
+    auto *edit = new CQDragRealSpin(parent);
+
+    if (prop) {
+      auto minStr = prop->minStr();
+      auto maxStr = prop->maxStr();
+
+      double min = 0.0, max = 1.0;
+      CStrUtil::toReal(minStr, &min);
+      CStrUtil::toReal(maxStr, &max);
+
+      edit->setRange(min, max);
+    }
 
     edit->setAutoFillBackground(true);
 
-    connect(edit, SIGNAL(editingFinished()), this, SLOT(updateValue()));
+    connect(edit, SIGNAL(valueChanged(double)), this, SLOT(updateValue()));
 
     w = edit;
   }
@@ -1797,9 +1922,13 @@ void
 CQLottieObjectTreeDelegate::
 updateValue()
 {
+  auto *lottie = tree_->lottie();
+
   auto *o = sender();
 
   setModelData(qobject_cast<QWidget *>(o), nullptr, editIndex_);
+
+  lottie->canvas()->invalidate();
 }
 
 //! get data to display in tree widget item
@@ -1821,7 +1950,17 @@ setEditorData(QWidget *w, const QModelIndex &index) const
   auto *layer  = (layerItem ? layerItem->layer() : nullptr);
   auto *shape  = (shapeItem ? shapeItem->shape() : nullptr);
 
+  //---
+
   auto *prop = valueItem->property();
+
+  CLottieVariant *var = nullptr;
+
+  if (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::REAL ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::STRING)
+    var = object->getVariant(valueItem->propName().toStdString());
 
   //---
 
@@ -1835,34 +1974,65 @@ setEditorData(QWidget *w, const QModelIndex &index) const
   if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
     auto *check = qobject_cast<QCheckBox *>(w);
 
-    if (valueItem->propName() == "hidden")
-      check->setChecked(object->isHidden().value_or(false));
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
-  }
-  else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-    auto *edit = qobject_cast<CQRealSpin *>(w);
-
-    auto *var = object->getVariant(valueItem->propName().toStdString());
-
-    double r = 0.0;
+    std::optional<bool> b;
 
     if (var)
-      r = CStrUtil::toReal(var->value());
+      b = var->bvalue();
+    else {
+      if (valueItem->propName() == "hidden")
+        b = object->isHidden().value_or(false);
+    }
+
+    if (b)
+      check->setChecked(*b);
+    else
+      std::cerr << "Failed to update bool\n";
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
+    auto *edit = qobject_cast<CQIntegerSpin *>(w);
+
+    std::optional<int> i;
+
+    if (var)
+      i = var->ivalue();
+
+    if (i)
+      edit->setValue(*i);
+    else
+      std::cerr << "Failed to update integer\n";
+  }
+  else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
+  //auto *edit = qobject_cast<CQRealSpin *>(w);
+    auto *edit = qobject_cast<CQDragRealSpin *>(w);
+
+    std::optional<double> r;
+
+    if (var)
+      r = var->rvalue();
+
+    if (r)
+      edit->setValue(*r);
     else
       std::cerr << "Failed to update real\n";
-
-    edit->setValue(r);
-
-    delete var;
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
     auto *edit = qobject_cast<QLineEdit *>(w);
 
-    if (valueItem->propName() == "refId") {
-      if (layer)
-        edit->setText(QString::fromStdString(layer->refId().value_or("")));
+    std::optional<std::string> s;
+
+    if (var)
+      s = var->value();
+    else {
+      if (valueItem->propName() == "refId") {
+        if (layer)
+          s  = layer->refId().value_or("");
+      }
     }
+
+    if (s)
+      edit->setText(QString::fromStdString(*s));
+    else
+      std::cerr << "Failed to update real\n";
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
     auto *chooser = qobject_cast<CQColorChooser *>(w);
@@ -1886,7 +2056,8 @@ setEditorData(QWidget *w, const QModelIndex &index) const
       chooser->setColor(toQColor(c.value()));
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
-    auto *edit = qobject_cast<CQRealSpin *>(w);
+  //auto *edit = qobject_cast<CQRealSpin *>(w);
+    auto *edit = qobject_cast<CQDragRealSpin *>(w);
 
     if (! prop) {
       std::cerr << "Failed to set edit for '" << valueItem->propName().toStdString() << "'\n";
@@ -1895,11 +2066,13 @@ setEditorData(QWidget *w, const QModelIndex &index) const
 
     auto str = prop->tvalueStr(timeFrame);
 
-    double r;
+    double r = 0.0;
     CStrUtil::toReal(str, &r);
 
     edit->setValue(r);
   }
+
+  delete var;
 }
 
 //! store displayed tree widget item data in model
@@ -1924,42 +2097,74 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
   auto *layer  = (layerItem ? layerItem->layer() : nullptr);
   auto *shape  = (shapeItem ? shapeItem->shape() : nullptr);
 
+  //---
+
   auto *prop = valueItem->property();
+
+  CLottieVariant *var = nullptr;
+
+  if (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::REAL ||
+      valueItem->propType() == CQLottieTreeValueItem::Type::STRING)
+    var = object->getVariant(valueItem->propName().toStdString());
+
+  //---
 
   if      (valueItem->propType() == CQLottieTreeValueItem::Type::BOOL) {
     auto *check = qobject_cast<QCheckBox *>(w);
 
-    if (valueItem->propName() == "hidden") {
-      object->setHidden(check->isChecked());
+    if (var) {
+      auto str = std::string(check->isChecked() ? "1" : "0");
 
-      lottie->canvas()->invalidate();
+      if (! var->setValue(str))
+        std::cerr << "Failed to set bool\n";
     }
-    else
-      std::cerr << "Failed to set bool\n";
+    else {
+      if (valueItem->propName() == "hidden")
+        object->setHidden(check->isChecked());
+      else
+        std::cerr << "Failed to set bool\n";
+    }
+
+    lottie->canvas()->invalidate();
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
-    std::cerr << "Failed to set integer\n";
+    auto *edit = qobject_cast<CQIntegerSpin *>(w);
+
+    auto str = std::to_string(edit->value());
+
+    if (! var || ! var->setValue(str))
+      std::cerr << "Failed to set integer\n";
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
-    auto *edit = qobject_cast<CQRealSpin *>(w);
+  //auto *edit = qobject_cast<CQRealSpin *>(w);
+    auto *edit = qobject_cast<CQDragRealSpin *>(w);
 
-    auto *var = object->getVariant(valueItem->propName().toStdString());
-    auto  str = std::to_string(edit->value());
+    auto str = std::to_string(edit->value());
 
     if (! var || ! var->setValue(str))
       std::cerr << "Failed to set real\n";
 
-    delete var;
+    lottie->canvas()->invalidate();
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
     auto *edit = qobject_cast<QLineEdit *>(w);
 
-    if (valueItem->propName() == "refId") {
-      if (layer)
-        layer->setRefId(edit->text().toStdString());
+    auto str = edit->text().toStdString();
+
+    if (var) {
+      if (! var->setValue(str))
+        std::cerr << "Failed to set string\n";
     }
-    else
-      std::cerr << "Failed to set string\n";
+    else {
+      if (valueItem->propName() == "refId") {
+        if (layer)
+          layer->setRefId(str);
+      }
+      else
+        std::cerr << "Failed to set string\n";
+    }
 
     lottie->canvas()->invalidate();
   }
@@ -1981,7 +2186,8 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
     lottie->canvas()->invalidate();
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
-    auto *edit = qobject_cast<CQRealSpin *>(w);
+  //auto *edit = qobject_cast<CQRealSpin *>(w);
+    auto *edit = qobject_cast<CQDragRealSpin *>(w);
 
     if (! prop) {
       std::cerr << "Failed to get edit for '" << valueItem->propName().toStdString() << "'\n";
@@ -1995,6 +2201,8 @@ setModelData(QWidget *w, QAbstractItemModel *, const QModelIndex &index) const
 
     lottie->canvas()->invalidate();
   }
+
+  delete var;
 }
 
 void
@@ -2014,7 +2222,7 @@ sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
   if      (index.column() == 1)
     s.setWidth(option.fontMetrics.horizontalAdvance("XXXXXXXXXXXX`"));
   else if (index.column() == 2)
-    s.setWidth(option.fontMetrics.horizontalAdvance("Animated"));
+    s.setWidth(option.fontMetrics.horizontalAdvance("Anim"));
 
   return s;
 }
@@ -2052,6 +2260,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
 
   //---
 
+  using OptColor = std::optional<QColor>;
+
+  OptColor customColor;
+
   auto *lottie = tree_->lottie();
 
   CLottieUtil::TimeFrame timeFrame;
@@ -2060,8 +2272,30 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
   if (property) {
     auto str = property->tvalueStr(timeFrame);
 
+    if (property->expression()) {
+      str += " (" + property->expression().value() + ")";
+
+      customColor = QColor(Qt::red);
+    }
+
     valueItem->setToolTip(1, QString::fromStdString(str));
   }
+
+  //---
+
+  auto drawStringI = [&](QPainter *painter, const QStyleOptionViewItem &option,
+                         const QString &str, const QModelIndex &index) {
+    if (customColor) {
+      auto option1 = option;
+
+      option1.palette.setColor(QPalette::WindowText, *customColor);
+      option1.palette.setColor(QPalette::Text      , *customColor);
+
+      drawString(painter, option1, str, index);
+    }
+    else
+      drawString(painter, option, str, index);
+  };
 
   //---
 
@@ -2102,6 +2336,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
           if (qlayer)
             b = qlayer->isEnabled();
         }
+        else if (valueItem->propName() == "threeD") {
+          if (layer && layer->threeD())
+            b = layer->threeD().value();
+        }
         else if (valueItem->propName() == "mask.inverted") {
           if (layer->mask() && layer->mask()->inverted)
             b = layer->mask()->inverted.value();
@@ -2118,7 +2356,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     if (b)
       drawChecked(painter, option, b.value(), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::INTEGER) {
     std::optional<int> i;
@@ -2161,6 +2399,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
           if (layer->matteTarget())
             i = layer->matteTarget().value();
         }
+#if 0
         else if (valueItem->propName() == "effect.type") {
           if (layer->effect() && layer->effect()->type())
             i = layer->effect()->type().value();
@@ -2177,6 +2416,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
           if (layer->effect() && layer->effect()->enabled())
             i = layer->effect()->enabled().value();
         }
+#endif
       }
       else if (shape) {
         if      (valueItem->propName() == "index") {
@@ -2273,17 +2513,29 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
         }
       }
       else if (effect) {
-        if (valueItem->propName() == "etype") {
+        if      (valueItem->propName() == "effect.type") {
           if (effect->type())
             i = effect->type().value();
+        }
+        else if (valueItem->propName() == "effect.index") {
+          if (effect->index())
+            i = effect->index().value();
+        }
+        else if (valueItem->propName() == "effect.numProperties") {
+          if (effect->numProperties())
+            i = effect->numProperties().value();
+        }
+        else if (valueItem->propName() == "effect.enabled") {
+          if (effect->enabled())
+            i = effect->enabled().value();
         }
       }
     }
 
     if (i)
-      drawString(painter, option, QString::number(i.value()), index);
+      drawStringI(painter, option, QString::number(i.value()), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::REAL) {
     std::optional<double> r;
@@ -2356,9 +2608,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (r)
-      drawString(painter, option, QString::number(r.value()), index);
+      drawStringI(painter, option, QString::number(r.value()), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::STRING) {
     std::optional<QString>     str;
@@ -2371,6 +2623,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     else if (valueItem->propName() == "type") {
       if (object->type())
         cstr = object->type().value();
+    }
+    else if (valueItem->propName() == "css") {
+      if (object->css())
+        cstr = object->css().value();
     }
     else {
       if      (root) {
@@ -2404,10 +2660,12 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
           if (layer->refId())
             cstr = layer->refId().value();
         }
+#if 0
         else if (valueItem->propName() == "effect.match") {
           if (layer->effect() && layer->effect()->match())
             cstr = layer->effect()->match().value();
         }
+#endif
         else if (valueItem->propName() == "precomp.refId") {
           if (layer->precomp() && layer->precomp()->refId)
             cstr = layer->precomp()->refId.value();
@@ -2426,21 +2684,11 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
           if (shape->longName())
             cstr = shape->longName().value();
         }
-        else if (valueItem->propName() == "stroke.dash.type") {
-          if (shape->stroke() && shape->stroke()->dash.type)
-            cstr = shape->stroke()->dash.type.value();
-        }
-        else if (valueItem->propName() == "stroke.dash.name") {
-          if (shape->stroke() && shape->stroke()->dash.name)
-            cstr = shape->stroke()->dash.name.value();
-        }
-        else if (valueItem->propName() == "gradientStroke.dash.type") {
-          if (shape->gradientStroke() && shape->gradientStroke()->dash.type)
-            cstr = shape->gradientStroke()->dash.type.value();
-        }
-        else if (valueItem->propName() == "gradientStroke.dash.name") {
-          if (shape->gradientStroke() && shape->gradientStroke()->dash.name)
-            cstr = shape->gradientStroke()->dash.name.value();
+      }
+      else if (effect) {
+        if      (valueItem->propName() == "effect.match") {
+          if (effect->match())
+            cstr = effect->match().value();
         }
       }
     }
@@ -2449,9 +2697,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
       str = QString::fromStdString(cstr.value());
 
     if (str)
-      drawString(painter, option, str.value(), index);
+      drawStringI(painter, option, str.value(), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::RGBA) {
     std::optional<CRGBA> c;
@@ -2466,7 +2714,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     if (c)
       drawColor(painter, option, toQColor(c.value()), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::COLOR) {
     std::optional<CRGBA> c;
@@ -2497,7 +2745,7 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     if (c)
       drawColor(painter, option, toQColor(c.value()), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SPLIT_POSITION) {
     std::optional<CPoint2D> p;
@@ -2521,9 +2769,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (p)
-      drawString(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
+      drawStringI(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::POSITION) {
     std::optional<CLottie::XYVals> xy;
@@ -2555,10 +2803,10 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     if (xy) {
       auto p = xy->toPoint(CPoint2D(0, 0));
 
-      drawString(painter, option, QString("%1,%2").arg(p.x).arg(p.y), index);
+      drawStringI(painter, option, QString("%1,%2").arg(p.x).arg(p.y), index);
     }
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SIZE) {
     std::optional<CPoint2D> p;
@@ -2572,9 +2820,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (p)
-      drawString(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
+      drawStringI(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::VECTOR) {
     std::optional<CPoint2D> p;
@@ -2625,9 +2873,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (p)
-      drawString(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
+      drawStringI(painter, option, QString("%1,%2").arg(p->x).arg(p->y), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::SCALAR) {
     std::optional<double> r;
@@ -2691,9 +2939,17 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
         if (shape->stroke() && shape->stroke()->miterLimitAnim.isSet())
           r = shape->stroke()->miterLimitAnim.tvalue(timeFrame);
       }
-      else if (valueItem->propName() == "stroke.dash.value") {
-        if (shape->stroke() && shape->stroke()->dash.value.isSet())
-          r = shape->stroke()->dash.value.tvalue(timeFrame);
+      else if (valueItem->propName() == "stroke.dash.offset") {
+        if (shape->stroke() && ! shape->stroke()->dash.offset.empty())
+          r = shape->stroke()->dash.offset[0].tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "stroke.dash.dash") {
+        if (shape->stroke() && ! shape->stroke()->dash.dash.empty())
+          r = shape->stroke()->dash.dash[0].tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "stroke.dash.gap") {
+        if (shape->stroke() && ! shape->stroke()->dash.gap.empty())
+          r = shape->stroke()->dash.gap[0].tvalue(timeFrame);
       }
       else if (valueItem->propName() == "group.opacity") {
         if (shape->group() && shape->group()->opacity.isSet())
@@ -2759,9 +3015,17 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
         if (shape->gradientStroke() && shape->gradientStroke()->width.isSet())
           r = shape->gradientStroke()->width.tvalue(timeFrame);
       }
-      else if (valueItem->propName() == "gradientStroke.dash.value") {
-        if (shape->gradientStroke() && shape->gradientStroke()->dash.value.isSet())
-          r = shape->gradientStroke()->dash.value.tvalue(timeFrame);
+      else if (valueItem->propName() == "gradientStroke.dash.offset") {
+        if (shape->gradientStroke() && ! shape->gradientStroke()->dash.offset.empty())
+          r = shape->gradientStroke()->dash.offset[0].tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "gradientStroke.dash.dash") {
+        if (shape->gradientStroke() && ! shape->gradientStroke()->dash.dash.empty())
+          r = shape->gradientStroke()->dash.dash[0].tvalue(timeFrame);
+      }
+      else if (valueItem->propName() == "gradientStroke.dash.gap") {
+        if (shape->gradientStroke() && ! shape->gradientStroke()->dash.gap.empty())
+          r = shape->gradientStroke()->dash.gap[0].tvalue(timeFrame);
       }
       else if (valueItem->propName() == "rectangle.roundness") {
         if (shape->rectangle() && shape->rectangle()->roundness.isSet())
@@ -2819,9 +3083,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (r)
-      drawString(painter, option, QString::number(*r), index);
+      drawStringI(painter, option, QString::number(*r), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
   }
   else if (valueItem->propType() == CQLottieTreeValueItem::Type::BEZIER) {
     std::optional<std::string> str;
@@ -2840,9 +3104,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (str)
-      drawString(painter, option, QString::fromStdString(*str), index);
+      drawStringI(painter, option, QString::fromStdString(*str), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
 
     valueItem->setToolTip(1, QString::fromStdString(str.value_or("")));
   }
@@ -2861,9 +3125,9 @@ paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &
     }
 
     if (str)
-      drawString(painter, option, QString::fromStdString(*str), index);
+      drawStringI(painter, option, QString::fromStdString(*str), index);
     else
-      drawString(painter, option, "<unset>", index);
+      drawStringI(painter, option, "<unset>", index);
 
     valueItem->setToolTip(1, QString::fromStdString(str.value_or("")));
   }

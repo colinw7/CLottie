@@ -63,6 +63,8 @@ SOURCES       = CQLottieMain.cpp \
 		CQLottiePath.cpp \
 		CQLottieImage.cpp \
 		CQImageDisplay.cpp \
+		CQDragSpin.cpp \
+		CQDragArea.cpp \
 		QPainterPathUtil.cpp .moc/moc_CQLottie.cpp \
 		.moc/moc_CQLottieCanvas.cpp \
 		.moc/moc_CQLottieTree.cpp \
@@ -72,7 +74,9 @@ SOURCES       = CQLottieMain.cpp \
 		.moc/moc_CQLottieTimeLine.cpp \
 		.moc/moc_CQLottiePath.cpp \
 		.moc/moc_CQLottieImage.cpp \
-		.moc/moc_CQImageDisplay.cpp
+		.moc/moc_CQImageDisplay.cpp \
+		.moc/moc_CQDragSpin.cpp \
+		.moc/moc_CQDragArea.cpp
 OBJECTS       = ../obj/CQLottieMain.o \
 		../obj/CQLottie.o \
 		../obj/CQLottieCanvas.o \
@@ -84,6 +88,8 @@ OBJECTS       = ../obj/CQLottieMain.o \
 		../obj/CQLottiePath.o \
 		../obj/CQLottieImage.o \
 		../obj/CQImageDisplay.o \
+		../obj/CQDragSpin.o \
+		../obj/CQDragArea.o \
 		../obj/QPainterPathUtil.o \
 		../obj/moc_CQLottie.o \
 		../obj/moc_CQLottieCanvas.o \
@@ -94,7 +100,9 @@ OBJECTS       = ../obj/CQLottieMain.o \
 		../obj/moc_CQLottieTimeLine.o \
 		../obj/moc_CQLottiePath.o \
 		../obj/moc_CQLottieImage.o \
-		../obj/moc_CQImageDisplay.o
+		../obj/moc_CQImageDisplay.o \
+		../obj/moc_CQDragSpin.o \
+		../obj/moc_CQDragArea.o
 DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/common/unix.conf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/common/linux.conf \
@@ -199,6 +207,8 @@ DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		CQLottiePath.h \
 		CQLottieImage.h \
 		CQImageDisplay.h \
+		CQDragSpin.h \
+		CQDragArea.h \
 		QPainterPathUtil.h CQLottieMain.cpp \
 		CQLottie.cpp \
 		CQLottieCanvas.cpp \
@@ -210,6 +220,8 @@ DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		CQLottiePath.cpp \
 		CQLottieImage.cpp \
 		CQImageDisplay.cpp \
+		CQDragSpin.cpp \
+		CQDragArea.cpp \
 		QPainterPathUtil.cpp
 QMAKE_TARGET  = CQLottie
 DESTDIR       = ../bin/
@@ -427,8 +439,8 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents CQLottieMain.h CQLottie.h CQLottieCanvas.h CQLottieTree.h CQLottieSettings.h CQLottieToolBar.h CQLottieStatusBar.h CQLottieTimeLine.h CQLottiePath.h CQLottieImage.h CQImageDisplay.h QPainterPathUtil.h $(DISTDIR)/
-	$(COPY_FILE) --parents CQLottieMain.cpp CQLottie.cpp CQLottieCanvas.cpp CQLottieTree.cpp CQLottieSettings.cpp CQLottieToolBar.cpp CQLottieStatusBar.cpp CQLottieTimeLine.cpp CQLottiePath.cpp CQLottieImage.cpp CQImageDisplay.cpp QPainterPathUtil.cpp $(DISTDIR)/
+	$(COPY_FILE) --parents CQLottieMain.h CQLottie.h CQLottieCanvas.h CQLottieTree.h CQLottieSettings.h CQLottieToolBar.h CQLottieStatusBar.h CQLottieTimeLine.h CQLottiePath.h CQLottieImage.h CQImageDisplay.h CQDragSpin.h CQDragArea.h QPainterPathUtil.h $(DISTDIR)/
+	$(COPY_FILE) --parents CQLottieMain.cpp CQLottie.cpp CQLottieCanvas.cpp CQLottieTree.cpp CQLottieSettings.cpp CQLottieToolBar.cpp CQLottieStatusBar.cpp CQLottieTimeLine.cpp CQLottiePath.cpp CQLottieImage.cpp CQImageDisplay.cpp CQDragSpin.cpp CQDragArea.cpp QPainterPathUtil.cpp $(DISTDIR)/
 
 
 clean: compiler_clean 
@@ -460,9 +472,9 @@ compiler_moc_predefs_clean:
 .moc/moc_predefs.h: /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp
 	g++ -pipe -std=c++17 -O2 -std=gnu++1z -Wall -Wextra -dM -E -o .moc/moc_predefs.h /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp
 
-compiler_moc_header_make_all: .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp
+compiler_moc_header_make_all: .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp .moc/moc_CQDragSpin.cpp .moc/moc_CQDragArea.cpp
 compiler_moc_header_clean:
-	-$(DEL_FILE) .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp
+	-$(DEL_FILE) .moc/moc_CQLottie.cpp .moc/moc_CQLottieCanvas.cpp .moc/moc_CQLottieTree.cpp .moc/moc_CQLottieSettings.cpp .moc/moc_CQLottieToolBar.cpp .moc/moc_CQLottieStatusBar.cpp .moc/moc_CQLottieTimeLine.cpp .moc/moc_CQLottiePath.cpp .moc/moc_CQLottieImage.cpp .moc/moc_CQImageDisplay.cpp .moc/moc_CQDragSpin.cpp .moc/moc_CQDragArea.cpp
 .moc/moc_CQLottie.cpp: CQLottie.h \
 		../include/CLottie.h \
 		../../CJson/include/CJson.h \
@@ -488,6 +500,8 @@ compiler_moc_header_clean:
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		.moc/moc_predefs.h \
 		/usr/lib/qt5/bin/moc
 	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQLottie.h -o .moc/moc_CQLottie.cpp
@@ -523,6 +537,8 @@ compiler_moc_header_clean:
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		.moc/moc_predefs.h \
 		/usr/lib/qt5/bin/moc
 	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQLottieTree.h -o .moc/moc_CQLottieTree.cpp
@@ -586,6 +602,16 @@ compiler_moc_header_clean:
 		/usr/lib/qt5/bin/moc
 	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQImageDisplay.h -o .moc/moc_CQImageDisplay.cpp
 
+.moc/moc_CQDragSpin.cpp: CQDragSpin.h \
+		.moc/moc_predefs.h \
+		/usr/lib/qt5/bin/moc
+	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQDragSpin.h -o .moc/moc_CQDragSpin.cpp
+
+.moc/moc_CQDragArea.cpp: CQDragArea.h \
+		.moc/moc_predefs.h \
+		/usr/lib/qt5/bin/moc
+	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/colinw/git/CLottie/qsrc/.moc/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/colinw/git/CLottie/qsrc -I/home/colinw/git/CLottie/include -I/home/colinw/git/CQUtil/include -I/home/colinw/git/CJson/include -I/home/colinw/git/CUtil/include -I/home/colinw/git/CMath/include -I/home/colinw/git/CStrUtil/include -I/home/colinw/git/COS/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/13 -I/usr/include/x86_64-linux-gnu/c++/13 -I/usr/include/c++/13/backward -I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include CQDragArea.h -o .moc/moc_CQDragArea.cpp
+
 compiler_moc_objc_header_make_all:
 compiler_moc_objc_header_clean:
 compiler_moc_source_make_all:
@@ -627,7 +653,11 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
-		../../CUtil/include/CDisplayRange2D.h
+		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
+		../../CUtil/include/CHRTimer.h \
+		../../COS/include/CHRTime.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieMain.o CQLottieMain.cpp
 
 ../obj/CQLottie.o: CQLottie.cpp CQLottie.h \
@@ -655,6 +685,8 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		CQLottieCanvas.h \
 		CQLottieToolBar.h \
 		CQLottieStatusBar.h \
@@ -664,6 +696,8 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		CQLottieSettings.h \
 		QPainterPathUtil.h \
 		../../CUtil/include/CEncode64.h \
+		../../CUtil/include/CHRTimer.h \
+		../../COS/include/CHRTime.h \
 		svg/play_svg.h \
 		../../CQUtil/include/CQPixmapCache.h \
 		svg/pause_svg.h \
@@ -696,7 +730,9 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
-		../../CUtil/include/CDisplayRange2D.h
+		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieCanvas.o CQLottieCanvas.cpp
 
 ../obj/CQLottieTree.o: CQLottieTree.cpp CQLottieTree.h \
@@ -725,12 +761,16 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		CQLottieCanvas.h \
 		CQLottieTimeLine.h \
 		CQLottiePath.h \
 		CQLottieImage.h \
 		../../CQUtil/include/CQMatrixStack2D.h \
+		CQDragSpin.h \
 		../../CQUtil/include/CQRealSpin.h \
+		../../CQUtil/include/CQIntegerSpin.h \
 		../../CQUtil/include/CQColorChooser.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieTree.o CQLottieTree.cpp
 
@@ -760,7 +800,11 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
+		CQLottieCanvas.h \
 		../../CQUtil/include/CQColorEdit.h \
+		../../CQUtil/include/CQRealSpin.h \
 		../../CQUtil/include/CQUtil.h \
 		../../CQUtil/include/CQUtilMeta.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieSettings.o CQLottieSettings.cpp
@@ -791,6 +835,8 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
 		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		../../CQUtil/include/CQIconButton.h \
 		../../CQUtil/include/CQSlider.h \
 		../../CQUtil/include/CQUtil.h \
@@ -822,7 +868,9 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
-		../../CUtil/include/CDisplayRange2D.h
+		../../CUtil/include/CDisplayRange2D.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieStatusBar.o CQLottieStatusBar.cpp
 
 ../obj/CQLottieTimeLine.o: CQLottieTimeLine.cpp CQLottieTimeLine.h \
@@ -851,6 +899,8 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		CQLottieStatusBar.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQLottieTimeLine.o CQLottieTimeLine.cpp
 
@@ -880,6 +930,8 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 		../../CUtil/include/CRGB.h \
 		../../CUtil/include/CRGBName.h \
 		../../CUtil/include/CUtil.h \
+		../../CUtil/include/CLineDash.h \
+		../../CUtil/include/CILineDash.h \
 		CQLottieStatusBar.h \
 		../../CQUtil/include/CQColorEdit.h \
 		../../CQUtil/include/CQRealSpin.h \
@@ -894,6 +946,15 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ../obj/CQImageDisplay.o: CQImageDisplay.cpp CQImageDisplay.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQImageDisplay.o CQImageDisplay.cpp
+
+../obj/CQDragSpin.o: CQDragSpin.cpp CQDragSpin.h \
+		CQDragArea.h \
+		../../CQUtil/include/CQRealSpin.h \
+		../../CQUtil/include/CQIntegerSpin.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQDragSpin.o CQDragSpin.cpp
+
+../obj/CQDragArea.o: CQDragArea.cpp CQDragArea.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/CQDragArea.o CQDragArea.cpp
 
 ../obj/QPainterPathUtil.o: QPainterPathUtil.cpp QPainterPathUtil.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/QPainterPathUtil.o QPainterPathUtil.cpp
@@ -927,6 +988,12 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ../obj/moc_CQImageDisplay.o: .moc/moc_CQImageDisplay.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQImageDisplay.o .moc/moc_CQImageDisplay.cpp
+
+../obj/moc_CQDragSpin.o: .moc/moc_CQDragSpin.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQDragSpin.o .moc/moc_CQDragSpin.cpp
+
+../obj/moc_CQDragArea.o: .moc/moc_CQDragArea.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o ../obj/moc_CQDragArea.o .moc/moc_CQDragArea.cpp
 
 ####### Install
 
