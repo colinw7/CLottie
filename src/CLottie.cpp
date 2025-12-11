@@ -122,8 +122,12 @@ load(const std::string &file)
 
   root_ = makeRoot();
 
+  //---
+
   if (! readRoot("root", value))
     return errorMsg("", "readRoot");
+
+  //---
 
   buildLayerHier();
 
@@ -132,6 +136,8 @@ load(const std::string &file)
 
     printHier();
   }
+
+  //---
 
   if (isStats()) {
     for (auto *layer : layers_) {
@@ -382,7 +388,8 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
       }
     }
     else if (name == "slots") { // slot ids
-      todoName(msg1, name, value1);
+      if (! readSlots(msg1, value1))
+        return false;
     }
     else if (name == "layers") {
       if (! value1->isArray())
@@ -418,7 +425,10 @@ readRoot(const std::string &msg, const CJson::ValueP &value)
     }
     else if (name == "meta") { // meta data
       // unhandledName(name, value1);
-     }
+    }
+    else if (name == "props") { // props
+      // unhandledName(name, value1);
+    }
     else {
       unhandledName(name, value1);
     }
@@ -574,7 +584,7 @@ readLayer(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *lay
       unhandledName(name, value1);
     }
     else if (name == "ct") { // Collapse Transform
-      unhandledName(name, value1);
+      layer->setCollapseTransform(valueToInt(value1));
     }
     else {
       auto typeId = layer->typeId().value_or(0);
@@ -751,6 +761,61 @@ readLayerShapes(const std::string &msg, const CJson::ValueP &iValue, CLottieLaye
 
     ++i;
   }
+
+  return true;
+}
+
+bool
+CLottie::
+readSlots(const std::string &msg, const CJson::ValueP &iValue)
+{
+  if (! iValue->isObject())
+    return errorMsg(msg, "slots is not an object");
+
+  auto *obj = iValue->cast<CJson::Object>();
+
+  CJson::Object::Names names;
+  obj->getNames(names);
+
+  for (const auto &name : names) {
+    auto msg1 = msg + "/" + name;
+
+    CJson::ValueP value1;
+    obj->getNamedValue(name, value1);
+
+    if (! value1->isObject())
+      return errorMsg(msg, "slots value is not an object");
+
+    auto *obj1 = value1->cast<CJson::Object>();
+
+    CJson::Object::Names names1;
+    obj1->getNames(names1);
+
+    for (const auto &name1 : names1) {
+      auto msg2 = msg1 + "/" + name1;
+
+      CJson::ValueP value2;
+      obj1->getNamedValue(name1, value2);
+
+      if (name1 == "p") {
+        slots_[name] = value2;
+      }
+      else
+        todoName(msg2, name1, value2);
+    }
+  }
+
+  return true;
+}
+
+bool
+CLottie::
+getSlotValue(const std::string &name, CJson::ValueP &value) const
+{
+  auto ps = slots_.find(name);
+  if (ps == slots_.end()) return false;
+
+  value = (*ps).second;
 
   return true;
 }
@@ -2275,7 +2340,7 @@ readSplitPositionProperty(const std::string &msg, const CJson::ValueP &iValue,
       position.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
-      position.length = valueToInt(value2);
+      position.setLength(valueToInt(value2));
     }
     else
       unhandledName(name1, value2);
@@ -2291,6 +2356,8 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &iValue,
 {
   if (! iValue->isObject())
     return errorMsg(msg, "vector is object");
+
+  vector.setLottie(const_cast<CLottie *>(this));
 
   auto *sObj = iValue->cast<CJson::Object>();
 
@@ -2408,10 +2475,13 @@ readVectorProperty(const std::string &msg, const CJson::ValueP &iValue,
       vector.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
-      vector.length = valueToInt(value2);
+      vector.setLength(valueToInt(value2));
     }
     else if (name1 == "x") {
       vector.setExpression(valueToString(value2));
+    }
+    else if (name1 == "sid") {
+      vector.setSlot(valueToString(value2));
     }
     else
       unhandledName(name1, value2);
@@ -2542,7 +2612,7 @@ readPositionProperty(const std::string &msg, const CJson::ValueP &iValue,
       position.setIndex(valueToInt(value2));
     }
     else if (name1 == "l") {
-      position.length = valueToInt(value2);
+      position.setLength(valueToInt(value2));
     }
     else
       unhandledName(name1, value2);
@@ -3135,6 +3205,8 @@ CLottie::
 readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
                    ScalarProperty &scalar) const
 {
+  scalar.setLottie(const_cast<CLottie *>(this));
+
   if (! iValue->isObject()) {
     scalar.setAnimated(false);
 
@@ -3244,6 +3316,9 @@ readScalarProperty(const std::string &msg, const CJson::ValueP &iValue,
     }
     else if (name1 == "x") {
       scalar.setExpression(valueToString(value2));
+    }
+    else if (name1 == "sid") {
+      scalar.setSlot(valueToString(value2));
     }
     else
       unhandledName(name1, value2);
@@ -3612,12 +3687,26 @@ double
 CLottie::
 valueToReal(const CJson::ValueP &value, double def) const
 {
-  if (! value->isNumber()) {
-    warnValueMsg("", "value not a real", value);
+  if (value->isNumber())
+    return value->toNumber();
+
+  if (value->isArray()) {
+    auto *array = value->cast<CJson::Array>();
+
+    if (array->size() == 1)
+      return valueToReal(array->indexValue(0));
+
+    if (array->size() > 1)
+      warnValueMsg("", "expected single value array", value);
+    else
+      warnValueMsg("", "empty value array", value);
+
     return def;
   }
 
-  return value->toNumber();
+  warnValueMsg("", "value not a real", value);
+
+  return def;
 }
 
 int
@@ -4328,6 +4417,8 @@ printI(const std::string &prefix, bool hier) const
   optPrintValue(prefix, "frameOut"   , frameOut_);
   optPrintValue(prefix, "startTime"  , startTime_);
   optPrintValue(prefix, "timeStretch", timeStretch_);
+
+  optPrintValue(prefix, "collapseTransform", collapseTransform_);
 
   optPrintValue(prefix, "refId", refId_);
 

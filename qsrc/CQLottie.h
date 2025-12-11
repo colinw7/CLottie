@@ -292,23 +292,15 @@ class CQLottie : public QWidget {
       int      rule  { 1 };
     };
 
-    // current stroke (TODO: remove)
+    // current stroke shape
     struct Stroke {
       const CLottieShape* shape { nullptr };
     };
 
-    // current gradient (TODO: remove)
+    // current gradient shape
     struct Gradient {
       const CLottieShape* shape { nullptr };
     };
-
-#if 0
-    struct Transform {
-      using Shapes = std::vector<const CLottieShape *>;
-
-      Shapes shapes;
-    };
-#endif
 
     // current trim paths
     struct Trim {
@@ -337,8 +329,6 @@ class CQLottie : public QWidget {
 
     TimeFrame timeFrame;
 
-//  CMatrixStack2D matrix;
-
     //---
 
     Fill     fill;
@@ -353,13 +343,7 @@ class CQLottie : public QWidget {
 
     //---
 
-#if 0
-    std::vector<CDisplayRange2D> displayRanges;
-#else
     CDisplayRange2D displayRange;
-#endif
-
-//  Transform transform;
 
     std::deque<ObjectState> objects;
 

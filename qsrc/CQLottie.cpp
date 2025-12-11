@@ -385,11 +385,7 @@ draw(QPainter *painter, bool update)
 
   drawState.painter = painter;
 
-#if 0
-  drawState.displayRanges.push_back(displayRange_);
-#else
   drawState.displayRange = displayRange_;
-#endif
 
   getTimeFrame(drawState.timeFrame);
 
@@ -1448,7 +1444,18 @@ drawPrecompLayer(const DrawState &drawState, CLottieLayer *layer)
   auto *asset = getPrecompLayerAsset(layer);
   if (! asset) return;
 
+  auto frame = double(drawState.timeFrame.frame) + drawState.timeFrame.delta;
+
   DrawState drawState1 = drawState;
+
+  if (layer->precomp() && layer->precomp()->startTime) {
+    auto startTime = layer->precomp()->startTime.value();
+
+    if (frame < startTime)
+      return;
+
+     drawState1.timeFrame.delta -= startTime;
+  }
 
   if (layer->frameIn())
     drawState1.timeFrame.delta -= layer->frameIn().value();
@@ -1459,21 +1466,6 @@ drawPrecompLayer(const DrawState &drawState, CLottieLayer *layer)
     drawState1.timeFrame.secs  = t;
     drawState1.timeFrame.frame = t*fps_;
   }
-
-#if 0
-  const auto &parentDisplayRange = drawState1.displayRanges.back();
-
-  double pxmin, pymin, pxmax, pymax;
-  parentDisplayRange.getWindowRange(&pxmin, &pymin, &pxmax, &pymax);
-
-  CDisplayRange2D displayRange;
-  displayRange.setPixelRange(pxmin, pymax, pxmax, pymin);
-
-  displayRange.setWindowRange(0, 0,
-    precomp->width.value_or(100), precomp->height.value_or(100));
-
-  drawState1.displayRanges.push_back(displayRange);
-#endif
 
   drawState1.objects.push_front(layer);
 
@@ -1774,11 +1766,6 @@ drawShape(DrawState &drawState, CLottieShape *shape)
     drawState.stroke.shape = shape;
   }
   else if (shapeType == CLottieShape::ShapeType::TRANSFORM) { // transform shape
-#if 0
-    drawState.transform.shapes.push_back(shape);
-
-    drawState.matrix = getShapeMatrix(drawState, shape);
-#endif
   }
   else if (shapeType == CLottieShape::ShapeType::TRIM) { // trim path
     assert(shape->trim());

@@ -270,6 +270,7 @@ inline std::string valueToString<CRGBA>(const CRGBA &rgba) {
 //---
 
 struct CLottieFactory;
+class  CLottie;
 struct CLottieRoot;
 struct CLottieLayer;
 struct CLottieMarker;
@@ -503,6 +504,8 @@ class CLottieProperty {
 
   const Type &type() const { return type_; }
 
+  void setLottie(CLottie *lottie) { lottie_ = lottie; }
+
   bool isAnimatedSet() const { return !!animated_; }
 
   bool isAnimated() const { return animated_.value_or(false); }
@@ -513,6 +516,9 @@ class CLottieProperty {
 
   const OptStr &expression() const { return expression_; }
   void setExpression(const OptStr &v) { expression_ = v; }
+
+  const OptStr &slot() const { return slot_; }
+  void setSlot(const OptStr &v) { slot_ = v; }
 
   //---
 
@@ -586,6 +592,8 @@ class CLottieProperty {
     optPrintValue(prefix, "index", index_);
 
     optPrintValue(prefix, "expression", expression_);
+
+    optPrintValue(prefix, "slot", slot_);
   }
 
  protected:
@@ -597,10 +605,12 @@ class CLottieProperty {
   }
 
  protected:
-  Type    type_;
-  OptBool animated_;
-  OptInt  index_;
-  OptStr  expression_;
+  CLottie* lottie_ { nullptr };
+  Type     type_;
+  OptBool  animated_;
+  OptInt   index_;
+  OptStr   expression_;
+  OptStr   slot_;
 };
 
 //---
@@ -701,6 +711,10 @@ class CLottie {
 
     //---
 
+    virtual PropertyT *readValue(CLottie *, const CJson::ValueP &) const { return nullptr; }
+
+    //---
+
     void print(const std::string &prefix="") const override {
       auto printValue = [&](const std::string &n, auto value) {
         std::cout << prefix << n << "=" << value << "\n";
@@ -784,6 +798,27 @@ class CLottie {
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (slot_) {
+        CJson::ValueP value;
+        if (! lottie_->getSlotValue(slot_.value(), value)) {
+          std::cerr << "No slot for " << slot_.value() << "\n";
+          return def;
+        }
+
+        auto *prop = readValue(lottie_, value);
+
+        if (! prop) {
+          std::cerr << "Failed to read value for slot " << slot_.value() << "\n";
+          return def;
+        }
+
+        auto res = prop->tvalue(frame, def);
+
+        delete prop;
+
+        return res;
+      }
+
       if (isAnimated()) {
         if (! isTSet())
           return def;
@@ -878,6 +913,15 @@ class CLottie {
       min_ = min;
       max_ = max;
     }
+
+    ScalarProperty *readValue(CLottie *lottie, const CJson::ValueP &ivalue) const override {
+      auto *scalar = new ScalarProperty(min_.value_or(0.0), max_.value_or(100.0));
+      if (! lottie->readScalarProperty("", ivalue, *scalar)) {
+        delete scalar;
+        return nullptr;
+      }
+      return scalar;
+    }
   };
 
   //---
@@ -908,6 +952,9 @@ class CLottie {
 
     const OptBool &split() const { return split_; }
     void setSplit(const OptBool &v) { split_ = v; }
+
+    const OptInt &length() const { return length_; }
+    void setLength(const OptInt &i) { length_ = i; }
 
     //---
 
@@ -1179,7 +1226,8 @@ class CLottie {
     ScalarProperty x;
     ScalarProperty y;
 
-    OptInt length;
+   private:
+    OptInt length_;
   };
 
   class VectorProperty : public CLottieProperty {
@@ -1202,6 +1250,11 @@ class CLottie {
     bool isSet() const override {
       return (! values.empty() || ! keyFrames.empty());
     }
+
+    //---
+
+    const OptInt &length() const { return length_; }
+    void setLength(const OptInt &i) { length_ = i; }
 
     //---
 
@@ -1267,6 +1320,27 @@ class CLottie {
     }
 
     OptVal tvalue(const TimeFrame &frame, const OptVal &def=OptVal()) const {
+      if (slot_) {
+        CJson::ValueP value;
+        if (! lottie_->getSlotValue(slot_.value(), value)) {
+          std::cerr << "No slot for " << slot_.value() << "\n";
+          return def;
+        }
+
+        auto *prop = readValue(lottie_, value);
+
+        if (! prop) {
+          std::cerr << "Failed to read value for slot " << slot_.value() << "\n";
+          return def;
+        }
+
+        auto res = prop->tvalue(frame, def);
+
+        delete prop;
+
+        return res;
+      }
+
       if (isAnimated()) {
         if (! isTSet())
           return def;
@@ -1336,11 +1410,23 @@ class CLottie {
       return def;
     }
 
+    //---
+
+    VectorProperty *readValue(CLottie *lottie, const CJson::ValueP &ivalue) const {
+      auto *vector = new VectorProperty();
+      if (! lottie->readVectorProperty("", ivalue, *vector)) {
+        delete vector;
+        return nullptr;
+      }
+      return vector;
+    }
+
    public:
     std::vector<CPoint2D>   values;
     std::vector<KeyFrame *> keyFrames;
 
-    OptInt length;
+   private:
+    OptInt length_;
   };
 
   //---
@@ -1363,6 +1449,11 @@ class CLottie {
     bool isSet() const override {
       return (! values.empty() || ! keyFrames.empty());
     }
+
+    //---
+
+    const OptInt &length() const { return length_; }
+    void setLength(const OptInt &i) { length_ = i; }
 
     //---
 
@@ -1501,7 +1592,8 @@ class CLottie {
     std::vector<XYVals>     values;
     std::vector<KeyFrame *> keyFrames;
 
-    OptInt length;
+   private:
+    OptInt length_;
   };
 
   //---
@@ -2307,6 +2399,12 @@ class CLottie {
     ScalarProperty size;
   };
 
+  struct Slot {
+    ScalarProperty rotation { 0, 360 };
+    VectorProperty scale;
+    ScalarProperty opacity;
+  };
+
  public:
   CLottie();
  ~CLottie();
@@ -2392,6 +2490,10 @@ class CLottie {
   bool readLayerMaskProperties(const std::string &msg, const CJson::ValueP &iValue,
                                CLottieLayer *layer);
   bool readLayerShapes(const std::string &msg, const CJson::ValueP &iValue, CLottieLayer *layer);
+
+  bool readSlots(const std::string &msg, const CJson::ValueP &iValue);
+
+  bool getSlotValue(const std::string &name, CJson::ValueP &value) const;
 
   bool readSplitPositionProperty(const std::string &msg, const CJson::ValueP &ivalue,
                                  SplitPositionProperty &position) const;
@@ -2488,6 +2590,10 @@ class CLottie {
   Markers markers_;
 
   Effects effects_;
+
+  using Slots = std::map<std::string, CJson::ValueP>;
+
+  Slots slots_;
 
   using LayoutTypeCount = std::map<int, int>;
   using ShapeTypeCount  = std::map<int, int>;
@@ -3099,6 +3205,9 @@ class CLottieLayer : public CLottieObject {
   const OptReal &timeStretch() const { return timeStretch_; }
   void setTimeStretch(const OptReal &v) { timeStretch_ = v; }
 
+  const OptInt &collapseTransform() const { return collapseTransform_; }
+  void setCollapseTransform(const OptInt &v) { collapseTransform_ = v; }
+
   //---
 
   Transform *transform() const { return transform_; }
@@ -3292,6 +3401,8 @@ class CLottieLayer : public CLottieObject {
   OptReal frameOut_;
   OptReal startTime_;
   OptReal timeStretch_;
+
+  OptInt collapseTransform_;
 
   // transform
   Transform *transform_ { nullptr };

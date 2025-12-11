@@ -1164,6 +1164,8 @@ load()
         continue;
       if (propName.name == "height" && ! layer->height())
         continue;
+      if (propName.name == "threeD" && ! layer->threeD())
+        continue;
       if (propName.name == "startTime" && ! layer->startTime())
         continue;
       if (propName.name == "timeStretch" && ! layer->timeStretch())
